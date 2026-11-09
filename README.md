@@ -1,7 +1,8 @@
-# 안암 카페 챗 (MVP)
+# 지도 검색 앱 (안암동 한정) (MVP)
+https://trialsession.vercel.app/
 
 문장으로 물어보면 → 후보 최대 5곳(영업시간·좌석·메뉴·분위기 키워드 포함) → 하나 고르면 지도에 핀으로 표시.
-Python 표준 라이브러리만 사용 (`pip install` 없음), 지도는 카카오맵 (JavaScript 키 필요).
+Python 표준 라이브러리만 사용 (`pip install` 없음), 지도는 카카오맵 (JavaScript, Rest 키 필요).
 
 ## 1. 실행
 
