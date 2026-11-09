@@ -1,0 +1,167 @@
+/* =====================================================================
+   디자인 값(토큰) — 디자인 시안이 오면 여기부터 바꾸세요.
+   색, 글자 크기, 둥글기를 바꾸면 모든 화면에 한꺼번에 적용돼요.
+   ===================================================================== */
+:root {
+  /* 색 */
+  --green: #1f7a57;  --green-soft: #e3f1ea;
+  --ink: #1a1b1f;    --muted: #7b818a;
+  --chip: #eef0f3;   --line: #e6e8ec;   --bg: #e9ebef;   --surface: #fff;
+  --danger: #c0392b;
+  /* 글자 */
+  --font: Pretendard, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+  --fs-title: 26px;  --fs-h2: 20px;  --fs-body: 14px;  --fs-small: 12px;  --fs-tiny: 11px;
+  /* 모양 */
+  --r-sheet: 22px;  --r-card: 16px;  --r-btn: 14px;  --r-pill: 999px;  --r-photo: 14px;
+  --pad: 22px;      /* 화면 좌우 여백 */
+  --sheet-max: 560px;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); font-family: var(--font); }
+#map { position: fixed; inset: 0; height: 100vh; height: 100dvh; background: var(--bg); }
+
+/* =====================================================================
+   지도 마커 (app.js 의 markerEl 과 짝)
+   ===================================================================== */
+.mk { position: relative; width: 0; height: 0; cursor: pointer; }
+.mk > * { position: absolute; }
+.dot { width: 14px; height: 14px; border-radius: 50%; background: #a9aeb6; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+.dot.faded { opacity: .55; }
+.pin { width: 30px; height: 30px; border-radius: 50%; background: var(--green); color: #fff; border: 2px solid #fff;
+  display: grid; place-items: center; font-weight: 700; font-size: 13px; box-shadow: 0 2px 6px rgba(0,0,0,.3); }
+.pin.sel { width: 34px; height: 34px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); background: var(--ink); font-size: 14px; }
+.pin.sel span { transform: rotate(45deg); }
+
+/* =====================================================================
+   바텀시트 뼈대
+   ===================================================================== */
+#sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000; background: var(--surface);
+  border-radius: var(--r-sheet) var(--r-sheet) 0 0; box-shadow: 0 -6px 24px rgba(20,24,32,.14);
+  display: flex; flex-direction: column; height: 366px; max-width: var(--sheet-max); margin: 0 auto;
+  transition: height .28s cubic-bezier(.2,.8,.2,1); }
+#sheet.dragging { transition: none; }
+[data-drag] { touch-action: none; cursor: grab; }
+.grab { padding: 10px 0 8px; display: grid; place-items: center; flex: none; }
+.grab i { width: 38px; height: 4px; border-radius: 2px; background: #cfd3d9; display: block; }
+.body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+/* 입력창이 필요 없는 화면(정보 수정, 출처 안내)에서는 하단 입력창과 출처 줄을 숨김 */
+#sheet[data-view="feedback"] .bar, #sheet[data-view="sources"] .bar, #sheet[data-view="feedback-done"] .bar,
+#sheet[data-view="feedback"] .foot, #sheet[data-view="sources"] .foot, #sheet[data-view="feedback-done"] .foot { display: none; }
+
+/* ---- 하단 검색창 ---- */
+.bar { flex: none; display: flex; gap: 8px; align-items: center; padding: 12px 16px 6px; background: var(--surface); }
+.bar input { flex: 1; min-width: 0; height: 48px; border: 1.5px solid #d3d7dd; border-radius: 24px; padding: 0 18px;
+  font: inherit; font-size: var(--fs-body); outline: none; background: var(--surface); }
+.bar input:focus { border-color: var(--green); }
+.bar button { flex: none; width: 48px; height: 48px; border-radius: 50%; border: 0; background: var(--ink); cursor: pointer; display: grid; place-items: center; }
+.bar button svg { width: 20px; height: 20px; stroke: #fff; fill: none; stroke-width: 2.2; stroke-linecap: round; }
+
+/* ---- 하단 정보 출처 줄 (모든 주요 화면) ---- */
+.foot { flex: none; display: flex; justify-content: center; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 0 16px calc(10px + env(safe-area-inset-bottom)); font-size: var(--fs-tiny); color: var(--muted); text-align: center; }
+.foot button { border: 0; background: none; padding: 0; font: inherit; color: var(--green); text-decoration: underline; cursor: pointer; }
+
+/* =====================================================================
+   화면 1. 홈 [data-screen="home"]
+   ===================================================================== */
+.eyebrow { font-size: var(--fs-tiny); font-weight: 700; color: var(--green); padding: 6px var(--pad) 0; }
+h1 { margin: 4px var(--pad) 0; font-size: var(--fs-title); font-weight: 600; letter-spacing: -.02em; }
+h1 em { font-style: normal; color: var(--green); }
+.sub { margin: 8px var(--pad) 16px; font-size: 13px; color: var(--muted); }
+.chips { display: flex; gap: 8px; padding: 14px 16px 4px; border-top: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chip { flex: 1 0 auto; min-width: 78px; border: 0; background: var(--chip); border-radius: var(--r-btn); padding: 12px 8px 10px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px; font: inherit; font-size: var(--fs-small); font-weight: 500; color: var(--ink); cursor: pointer; }
+.ico { width: 22px; height: 22px; stroke: var(--green); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+/* =====================================================================
+   화면 2·3. 검색 중 / 결과 목록 [data-screen="loading|results"]
+   ===================================================================== */
+.rhead { padding: 4px var(--pad) 8px; }
+.rtitle { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.rtitle b { font-size: 16px; font-weight: 600; }
+.rtitle .q { color: var(--green); }
+.link { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12.5px; text-decoration: underline; cursor: pointer; padding: 0; flex: none; }
+.und { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0 0; font-size: var(--fs-small); color: var(--muted); }
+.und .c { background: var(--chip); color: var(--ink); border-radius: var(--r-pill); padding: 3px 9px; font-weight: 600; }
+.notice { display: block; margin-top: 4px; font-size: var(--fs-tiny); color: var(--muted); }
+
+.cards { list-style: none; margin: 0; padding: 4px 14px 8px; display: flex; flex-direction: column; gap: 10px; }
+.card { display: flex; gap: 12px; align-items: flex-start; padding: 14px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface); cursor: pointer; }
+.card:active { background: #f6f7f9; }
+.rank { flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--green); color: #fff; display: grid; place-items: center; font-size: 13px; font-weight: 700; }
+.cmain { min-width: 0; flex: 1; }
+.cname { font-size: 15px; font-weight: 600; }
+.meta { margin-top: 3px; font-size: var(--fs-small); color: var(--muted); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.reason { margin-top: 6px; font-size: 13px; color: #3a3f46; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.kw { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.kw span { background: var(--green-soft); color: var(--green); font-size: 11.5px; font-weight: 600; border-radius: var(--r-pill); padding: 3px 9px; }
+.badge { font-size: var(--fs-tiny); font-weight: 700; padding: 2px 8px; border-radius: var(--r-pill); }
+.badge.open { background: var(--green-soft); color: var(--green); }
+.badge.closed { background: var(--chip); color: var(--muted); }
+.thumb { flex: none; width: 64px; height: 64px; border-radius: 12px; overflow: hidden; background: var(--chip); }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb.broken { display: none; }
+
+.skel { height: 96px; border-radius: var(--r-card); background: linear-gradient(90deg,#f0f2f5 25%,#e6e9ed 37%,#f0f2f5 63%); background-size: 400% 100%; animation: sh 1.2s infinite; }
+@keyframes sh { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+.empty { padding: 18px var(--pad); font-size: 13px; color: var(--muted); line-height: 1.6; }
+
+/* =====================================================================
+   화면 5. 카페 상세 [data-screen="detail"]
+   ===================================================================== */
+.page { padding: 0 var(--pad) 18px; }
+.toprow { display: flex; justify-content: space-between; align-items: center; }
+.back { border: 0; background: none; font: inherit; font-size: 13px; color: var(--muted); padding: 2px 0 8px; cursor: pointer; }
+.photos { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory; margin: 0 calc(var(--pad) * -1) 12px; padding: 0 var(--pad); scrollbar-width: none; }
+.photos::-webkit-scrollbar { display: none; }
+.photo { flex: 0 0 78%; margin: 0; scroll-snap-align: start; }
+.photos.one .photo { flex-basis: 100%; }
+.ph { aspect-ratio: 16 / 10; border-radius: var(--r-photo); overflow: hidden; background: var(--chip); display: grid; place-items: center; color: var(--muted); font-size: var(--fs-small); text-align: center; }
+.ph img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ph .ico { stroke: #aab0b8; width: 28px; height: 28px; }
+.ph.empty, .ph.broken { align-content: center; gap: 6px; }
+figcaption { margin-top: 5px; font-size: var(--fs-tiny); color: var(--muted); }
+figcaption a { color: var(--muted); }
+.page h2 { margin: 0; font-size: var(--fs-h2); font-weight: 600; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.addr { font-size: var(--fs-small); color: var(--muted); margin: 3px 0 0; }
+.rows { margin: 14px 0 0; display: grid; gap: 10px; }
+.row { display: flex; gap: 10px; align-items: flex-start; font-size: var(--fs-body); line-height: 1.45; }
+.row .ico { width: 18px; height: 18px; margin-top: 2px; }
+.row b { flex: none; width: 38px; font-weight: 500; color: var(--muted); font-size: 13px; }
+.row span { min-width: 0; overflow-wrap: anywhere; }
+.row .none { color: #b2b7be; }
+.more { margin-top: 12px; font-size: var(--fs-small); color: var(--muted); }
+.more summary { cursor: pointer; }
+.more p { margin: 6px 0 0; line-height: 1.5; }
+.basis { margin-top: 12px; font-size: var(--fs-tiny); color: var(--muted); }
+.actions { display: grid; gap: 8px; margin-top: 16px; }
+.go, .btn2 { display: block; width: 100%; text-align: center; text-decoration: none; border-radius: var(--r-btn); padding: 13px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.go { background: var(--ink); color: #fff; border: 0; }
+.go:disabled { opacity: .5; }
+.btn2 { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+
+/* =====================================================================
+   화면 6. 정보 수정 제안 [data-screen="feedback|feedback-done"]
+   ===================================================================== */
+.fbtitle { margin: 0; font-size: var(--fs-h2); font-weight: 600; }
+.lead { margin: 6px 0 14px; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.seg { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.seg button { border: 1px solid var(--line); background: var(--surface); border-radius: var(--r-pill); padding: 8px 14px; font: inherit; font-size: 13px; cursor: pointer; }
+.seg button.on { background: var(--green); border-color: var(--green); color: #fff; font-weight: 600; }
+.field { display: block; margin-bottom: 12px; font-size: var(--fs-small); color: var(--muted); }
+.field textarea, .field input { display: block; width: 100%; margin-top: 6px; border: 1.5px solid #d3d7dd; border-radius: 12px; padding: 11px 13px; font: inherit; font-size: var(--fs-body); color: var(--ink); outline: none; resize: none; }
+.field textarea { min-height: 88px; }
+.field textarea:focus, .field input:focus { border-color: var(--green); }
+.err { min-height: 18px; margin: 0 0 8px; font-size: var(--fs-small); color: var(--danger); }
+.fine { margin: 10px 0 0; font-size: var(--fs-tiny); color: var(--muted); line-height: 1.5; }
+.done { text-align: center; padding: 28px 0 6px; }
+.done .ico { width: 40px; height: 40px; stroke: var(--green); }
+
+/* =====================================================================
+   화면 7. 데이터·정보 출처 [data-screen="sources"]
+   ===================================================================== */
+.src { margin: 14px 0 0; display: grid; gap: 14px; }
+.src h3 { margin: 0 0 3px; font-size: 13.5px; font-weight: 600; }
+.src p { margin: 0; font-size: 13px; color: #4a4f57; line-height: 1.55; }

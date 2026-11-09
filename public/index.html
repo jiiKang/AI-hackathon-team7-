@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>안암 카페 챗</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
+<!-- 디자인(색·글자·간격·모양)은 styles.css, 문구·화면 구성은 app.js 에서 바꿔요 -->
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="map"></div>
+
+<section id="sheet" aria-label="카페 검색" data-view="home">
+  <div class="grab" id="grab" data-drag><i></i></div>
+  <div class="body" id="body"></div>
+  <form class="bar" id="form" autocomplete="off">
+    <input id="q" type="text" enterkeyhint="search" maxlength="120" aria-label="검색어">
+    <button type="submit" aria-label="검색"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4-4"/></svg></button>
+  </form>
+  <footer class="foot" id="foot"></footer>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>
