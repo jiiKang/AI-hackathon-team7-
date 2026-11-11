@@ -4,36 +4,8 @@ https://trialsession.vercel.app/
 문장으로 물어보면 → 후보 최대 5곳(영업시간·좌석·메뉴·분위기 키워드 포함) → 하나 고르면 지도에 핀으로 표시.
 Python 표준 라이브러리만 사용 (`pip install` 없음), 지도는 카카오맵 (JavaScript, Rest 키 필요).
 
-## 1. 실행
 
-```bat
-:: Windows (cmd)
-copy .env.example .env
-set CAFES_PATH=data/cafes.sample.json
-python server.py
-```
-```bash
-# 맥/리눅스
-cp .env.example .env
-CAFES_PATH=data/cafes.sample.json python3 server.py
-```
-→ http://127.0.0.1:8000  (Windows에서 `python`이 안 되면 `py server.py`)
-- 폰에서 보려면: `HOST=0.0.0.0 python3 server.py` 후 같은 와이파이에서 `http://<내 PC IP>:8000`
-- 인터넷이 필요해요: 카카오맵 SDK와 폰트를 불러와요. 시연 장소 와이파이를 미리 확인하세요.
 
-## 2. 해야 할 일 (★ 표시)
-
-| 할 일 | 위치 |
-|---|---|
-| ★ 카페 10곳 데이터 채우기 | `data/cafes.json` (지금은 빈 칸 10개) |
-| ★ 카카오 JavaScript 키 입력 (필수, 없으면 지도가 안 떠요) | `.env` 의 `KAKAO_JS_KEY` |
-| ★ 카카오 REST API 키 입력 (상호명 → 좌표 자동 조회, 공란이면 좌표를 직접 적어야 해요) | `.env` 의 `KAKAO_REST_KEY` |
-| ★ LLM API 키 입력 (비워도 동작: 키워드 매칭 모드) | `.env` 의 `GEMINI_API_KEY` |
-| ★ 무료로 쓸 수 있는 모델명 확인 | `.env` 의 `GEMINI_MODEL` (무료 한도·모델명은 바뀌어요) |
-| 안암역 좌표/지도 중심 | `public/app.js` 맨 위 `STATION` |
-
-데이터를 다 채우면 `CAFES_PATH` 없이 `python3 server.py` 만 실행하면 돼요.
-`cafes.json`은 수정하면 서버 재시작 없이 바로 반영돼요. 내용이 비어 있는 칸은 검색 대상에서 자동으로 빠져요.
 
 ## 3. 팀 시트(TSV/CSV)로 채우기 — 변환기
 
@@ -101,13 +73,6 @@ data/cafes.json      # ★ 채울 데이터 (빈 칸)
 data/cafes.sample.json  # 동작 확인용 샘플 10곳
 ```
 
-## 6. 알려둘 점
-- 검증한 것: 서버 API, LLM 응답 파싱과 오류 시 대체(모킹), 바텀시트 스와이프·카드·핀·뒤로가기(브라우저 자동 테스트).
-- 아직 안 해본 것: 실제 Gemini 호출, 실제 카카오맵 렌더링 (제 작업 환경에서 외부 접속이 막혀 있어서 카카오 SDK는 가짜로 대체해 시험했어요). 첫 실행 때 지도가 안 뜨면 키·도메인 등록·인터넷을 확인해 주세요.
-- 카카오 개발자 콘솔에서 꼭 설정할 것 (안 하면 지도가 빈 화면):
-  1. 제품 설정 → 카카오맵 → **사용 설정 ON**
-  2. 플랫폼의 **JavaScript SDK 도메인**에 `http://127.0.0.1:8000`, `http://localhost:8000` 등록 (폰이나 배포 주소로 접속하면 그 주소도 등록)
-- 마커 모양은 `public/app.js` 의 `markerEl()` 과 `styles.css`(`.dot`, `.pin`, `.pin.sel`)에서 바꿔요.
 
 ## 7. Vercel로 배포 (링크로 접속)
 
@@ -118,29 +83,6 @@ data/cafes.sample.json  # 동작 확인용 샘플 10곳
 2. 좌표를 배포 전에 만들어 둬요. Vercel에서는 파일을 저장할 수 없어서, 로컬에서 `KAKAO_REST_KEY` 를 넣고 서버를 한 번 켜서 `data/geocode_cache.json` 이 생기게 해 두거나, 시트에 `위도`,`경도` 를 직접 적어요.
 3. `.env` 는 올라가지 않아요 (`.vercelignore`). 키는 아래처럼 Vercel에 따로 넣어요.
 
-**배포 (Windows cmd, Node.js 설치 필요)**
-```bat
-npm i -g vercel
-vercel login
-vercel
-```
-처음 `vercel` 실행 때 질문은 기본값(엔터)으로 답하고, 프로젝트 이름만 정해요. 그 다음 키를 넣고 운영 배포를 해요.
-```bat
-vercel env add GEMINI_API_KEY production
-vercel env add KAKAO_JS_KEY production
-vercel env add GEMINI_MODEL production      (선택: 예 gemini-3.1-flash-lite)
-vercel --prod
-```
-`vercel env add` 를 하면 값을 붙여 넣으라고 물어봐요. 환경변수를 바꾼 뒤에는 `vercel --prod` 를 다시 해야 반영돼요.
-
-**카카오 도메인 등록 (필수, 안 하면 지도가 빈 화면)**
-`vercel --prod` 가 알려 주는 주소(`https://프로젝트이름.vercel.app`)를 카카오 개발자 콘솔의 JavaScript SDK 도메인에 추가해요. 프리뷰 주소(`vercel` 만 실행했을 때)는 매번 달라서, 시연은 항상 `--prod` 주소로 해요.
-
-**알아둘 점**
-- 링크를 아는 누구나 접속해서 무료 AI 한도를 쓸 수 있어요. IP당 분당 30회 제한이 있지만(`RATE_LIMIT_PER_MIN`), 서버가 여러 개로 나뉘면 정확하지 않아요. 링크는 필요한 사람에게만 알려요.
-- 카페 데이터(`data/cafes.json`)를 고치면 다시 `vercel --prod` 해야 반영돼요.
-- 함수는 한 번 안 쓰면 잠들어서 첫 검색이 조금 느릴 수 있어요. 발표 전에 한 번 눌러 두세요.
-- 검색 결과 캐시는 서버 메모리라서 배포 환경에서는 가끔 사라질 수 있어요.
 
 ## 8. 디자인 시안 교체 가이드 (Figma → 코드)
 
