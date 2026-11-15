@@ -634,6 +634,15 @@ function openFeedback() {
   Object.assign(FB, { field: "", value: "", url: "", err: "" });
   go("feedback", FB);
 }
+/* 정보 수정 제보를 DB 에 저장 (로그인 필요). 같은 카페·항목은 내 제보 1건을 덮어써요. 실패해도 제보 자체(서버 전송)는 이미 됐으니 화면은 막지 않아요. */
+async function saveReport(f) {
+  const k = cafeKey(cafeById(S.selected));
+  if (!A.user || !k) return;
+  const { error } = await A.sb.from("attr_report").upsert(
+    { cafe_id: k, field: f.field, reported_value: f.value || "(내용 없음)", note: f.url || null, user_id: A.user.id },
+    { onConflict: "cafe_id,field,user_id" });
+  if (error) console.warn("제보 DB 저장 실패:", error.message);
+}
 async function sendFeedback() {
   const err = $("#fbErr"), btn = $("#fbSend");
   FB.value = $("#fbValue").value.trim(); FB.url = $("#fbUrl").value.trim();
@@ -645,6 +654,7 @@ async function sendFeedback() {
       body: JSON.stringify({ cafe_id: S.selected, field: FB.field, value: FB.value, url: FB.url }) });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || `오류 (${r.status})`);
+    await saveReport(FB);                                // 로그인했으면 내 계정 DB(attr_report)에도 저장
     S.cur = { view: "feedback-done" }; draw();          // 완료 화면에서 '돌아가기'는 상세로 (쌓인 화면 그대로)
   } catch (e) {
     btn.disabled = false; err.textContent = e.message || "보내지 못했어요. 잠시 후 다시 시도해 주세요.";

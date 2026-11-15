@@ -803,6 +803,10 @@ class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(FRONT), **kw)
 
+    def end_headers(self):                  # 로컬 개발: 화면 파일을 브라우저가 기억하지 않게 (고치면 새로고침만으로 반영)
+        self.send_header("Cache-Control", "no-cache")
+        super().end_headers()
+
     def _json(self, obj, status=200):
         body = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(status)
