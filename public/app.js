@@ -678,7 +678,8 @@ async function searchAddress(text) {    // 홈 아래 검색창: 주소로 찾�
   let list = [];
   if (pt) {
     S.here = pt;
-    list = S.all.filter(c => c.lat != null && c.open_now !== false)     // 지금 영업이 끝난 곳은 빼요.map(c => ({ ...c, _d: meters(pt.lat, pt.lng, c.lat, c.lng) })).sort((a, b) => a._d - b._d).slice(0, 5)
+    list = S.all.filter(c => c.lat != null && c.open_now !== false)     // 지금 영업이 끝난 곳은 빼요
+      .map(c => ({ ...c, _d: meters(pt.lat, pt.lng, c.lat, c.lng) })).sort((a, b) => a._d - b._d).slice(0, 5)
       .map((c, i) => ({ ...c, rank: i + 1, matched: [fmtM(c._d)], reason: "" }));
   } else {                              // 지도 검색을 못 쓰면 우리 카페 주소·이름에서 글자 찾기
     S.here = null;
