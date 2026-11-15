@@ -104,10 +104,18 @@ async function loadFavs() {
   const { data } = await A.sb.from("user_favorite").select("cafe_id");
   (data || []).forEach(r => A.favs.add(r.cafe_id));
 }
+async function loadHist() {             // 로그인 계정에 저장된 이전 검색을 기록에 합침
+  if (!A.user) return;
+  const { data } = await A.sb.from("user_search_log").select("query,created_at").order("created_at", { ascending: false }).limit(30);
+  const seen = new Set(S.hist.map(h => h.q));
+  const more = (data || []).filter(r => !seen.has(r.query) && seen.add(r.query)).map(r => ({ q: r.query, und: [], t: Date.parse(r.created_at) }));
+  S.hist = [...S.hist, ...more].sort((a, b) => b.t - a.t).slice(0, 30);
+  store.set("hist", S.hist);
+}
 async function setUser(u) {
   A.user = u || null;
   if (A.user) welcome.hidden = true;
-  await loadFavs();
+  await Promise.all([loadFavs(), loadHist()]);
   if (["home", "saved", "detail"].includes(S.cur.view)) draw();
 }
 async function googleLogin() {
@@ -678,7 +686,11 @@ document.addEventListener("click", e => {
   if (t.closest("[data-back]")) return back();
   if (t.closest("[data-showmap]")) return showOnMap();
   if (t.closest("[data-history]")) return go("history");
-  if (t.closest("[data-clear]")) { S.hist = []; store.set("hist", []); return draw(); }
+  if (t.closest("[data-clear]")) {
+    S.hist = []; store.set("hist", []);
+    if (A.user) A.sb.from("user_search_log").delete().eq("user_id", A.user.id).then(() => {});
+    return draw();
+  }
   if (t.closest("[data-feedback]")) return openFeedback();
   if (t.closest("[data-sources]")) return go("sources");
   const f = t.closest("[data-field]");
