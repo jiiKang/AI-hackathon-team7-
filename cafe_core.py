@@ -47,6 +47,8 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()      # ★ LLM API
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")  # ★ 현재 무료로 쓸 수 있는 모델명 확인 후 교체
 KAKAO_JS_KEY = os.environ.get("KAKAO_JS_KEY", "").strip()                # ★ 카카오 JavaScript 키 (지도 표시에 필수)
 KAKAO_REST_KEY = os.environ.get("KAKAO_REST_KEY", "").strip()            # ★ 카카오 REST API 키 (상호명→좌표 자동 조회용, 공란 OK)
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip()                # ★ 구글 로그인·회원별 DB용 (공란이면 로그인 없이 '둘러보기'만)
+SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "").strip()      # 공개 키(anon/publishable). service_role 키는 절대 넣지 마세요
 # ==========================================================================
 
 _cp = os.environ.get("CAFES_PATH") or "data/cafes.json"
@@ -236,7 +238,7 @@ def basis(c):
 
 def public(c, rank=None, reason="", matched=None):
     d = {
-        "id": c["id"], "name": c.get("name", ""), "address": c.get("address", ""),
+        "id": c["id"], "src_id": c.get("src_id", ""), "name": c.get("name", ""), "address": c.get("address", ""),
         "lat": c["lat"], "lng": c["lng"], "summary": summarize(c), "notes": notes(c),
         "photos": _photos(c), "basis": basis(c), "open_now": is_open_now(c.get("hours") or {}),
     }
@@ -629,7 +631,8 @@ def api_cafes():
 
 
 def api_config():
-    return 200, {"kakaoKey": KAKAO_JS_KEY}   # JS 키는 원래 브라우저에 공개되는 키 (도메인 등록으로 보호)
+    # JS 키·anon 키는 원래 브라우저에 공개되는 키 (도메인 등록·RLS 로 보호)
+    return 200, {"kakaoKey": KAKAO_JS_KEY, "supabaseUrl": SUPABASE_URL, "supabaseKey": SUPABASE_ANON_KEY}
 
 
 def api_search(raw, length, ip="local"):

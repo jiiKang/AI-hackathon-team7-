@@ -258,3 +258,45 @@ button { color: inherit; }
 #toast { position: absolute; left: 50%; bottom: calc(110px + var(--safe-b)); transform: translate(-50%, 12px); z-index: 60; background: rgba(20,22,26,.88); color: #fff;
   font-size: 13px; padding: 10px 16px; border-radius: var(--r-pill); opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; white-space: nowrap; }
 #toast.on { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---------- 시작 화면 (구글 로그인) · 계정 ---------- */
+#welcome { position: fixed; inset: 0; z-index: 2000; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: var(--pad); }
+#welcome[hidden] { display: none; }
+#welcome .wbox { width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 12px; }
+#welcome .eyebrow { color: var(--blue); font-size: var(--fs-small); font-weight: 700; }
+#welcome h1 { font-size: 26px; line-height: 1.3; margin: 4px 0 0; }
+#welcome h1 em { font-style: normal; color: var(--blue); }
+#welcome .sub { color: var(--muted); font-size: var(--fs-body); margin: 0 0 14px; }
+#welcome .err { color: var(--danger); font-size: var(--fs-small); margin: 0; min-height: 1em; }
+.gbtn { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; border-radius: var(--r-btn); padding: 13px; font-size: 14px; font-weight: 600; cursor: pointer; background: #fff; color: var(--ink); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.gbtn svg { width: 18px; height: 18px; }
+.acct { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--fs-small); color: var(--muted); margin: 8px 0 14px; }
+.acct b { color: var(--ink); font-weight: 600; }
+.favbtn { margin-top: 8px; }
+
+/* 시작 화면: 로고 + 구글 버튼만 */
+#welcome .wbox { align-items: center; gap: 22px; }
+#welcome .logo { width: min(62vw, 260px); height: auto; border-radius: 28px; }
+#welcome .gbtn { max-width: 320px; }
+#welcome .guest { border: 0; background: none; color: var(--muted); font-size: var(--fs-small); text-decoration: underline; cursor: pointer; padding: 4px; }
+#welcome .err { text-align: center; }
+
+/* 시작 화면 꾸밈: 표지판이 옆에서 들어오고, 위아래에 공사장 사선 띠 (앱 홈의 hazard 와 같은 모양) */
+#welcome { background: radial-gradient(120% 70% at 50% 38%, #fff 0%, var(--blue-soft) 100%); overflow: hidden; }
+#welcome::before, #welcome::after { content: ""; position: absolute; left: 0; right: 0; height: 22px;
+  background: repeating-linear-gradient(-45deg, var(--yellow) 0 14px, var(--black) 14px 28px); }
+#welcome::before { top: 0; } #welcome::after { bottom: 0; }
+#welcome .logo { width: min(80vw, 340px); border-radius: 0; filter: drop-shadow(0 10px 18px rgba(30,50,120,.28));
+  animation: signIn .7s cubic-bezier(.2,.9,.3,1.1) both; }
+#welcome .gbtn, #welcome .guest, #welcome .err { animation: fadeUp .5s .35s ease both; }
+@keyframes signIn { from { opacity: 0; transform: translateX(-60px) rotate(-3deg); } to { opacity: 1; transform: none; } }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { #welcome .logo, #welcome .gbtn, #welcome .guest, #welcome .err { animation: none; } }
+
+/* 카페 상세: 주소 옆 하트(저장) */
+.dname { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.dname .dtxt { min-width: 0; }
+.heart { flex: none; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: #fff; display: grid; place-items: center; cursor: pointer; box-shadow: var(--shadow); transition: transform .15s; }
+.heart:active { transform: scale(.9); }
+.heart svg { width: 24px; height: 24px; stroke: var(--muted); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: fill .15s, stroke .15s; }
+.heart.on svg { fill: #e5484d; stroke: #e5484d; }

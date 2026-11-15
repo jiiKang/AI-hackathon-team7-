@@ -43,7 +43,7 @@ const SOURCES = [                    // 데이터·출처 안내 화면
   ["AI 해석", "질문을 검색 조건으로 바꾸고 카페에 대한 질문에 답하는 데만 AI(Gemini)를 써요. 카페 정보는 정리된 데이터에서만 가져오고, 없는 내용은 '확인되지 않았어요'라고 답해요."],
   ["사진", "사진 아래에 출처를 표시해요. 사진의 저작권은 원 저작자에게 있어요."],
   ["정보 수정", "틀린 정보는 카페 상세의 '정보가 달라요'로 알려 주세요. 확인 후 반영해요."],
-  ["내 기록", "최근 대화와 추천은 이 기기(브라우저)에만 저장되고 서버로 보내지 않아요."],
+  ["내 기록", "로그인하지 않으면 최근 대화와 추천은 이 기기(브라우저)에만 저장돼요. Google로 로그인하면 저장한 카페와 검색어가 내 계정에 보관돼요(본인만 볼 수 있어요)."],
 ];
 const NAV = [                        // 하단 둥근 메뉴 (아이콘은 ICON 참고) — act: 눌렀을 때 동작
   { id: "home",    icon: "home",  label: "홈" },
@@ -87,6 +87,48 @@ const app = $("#app"), sheet = $("#sheet"), body = $("#body"), page = $("#page")
 const S = { all: [], results: [], understood: [], notice: "", query: "", selected: null, token: 0, here: null,
   cur: { view: "home" }, stack: [], qa: {}, hist: store.get("hist", []) };
 let map = null, overlays = [], hereOverlay = null;
+
+/* ---------- 회원 (Supabase Auth · Google 로그인) ----------
+   키가 없으면(A.sb 없음) 로그인 기능은 숨기고 예전처럼 동작해요. 회원별 데이터는 RLS 로 본인 것만 읽고 써요:
+   user_profile(로그인 시 자동 생성) · user_favorite(저장한 카페) · user_search_log(검색 기록) */
+const A = { sb: null, user: null, favs: new Set() };
+const welcome = $("#welcome");
+const cafeKey = c => c && c.src_id;                       // Supabase cafe.id (공공 매장 ID)
+const userName = () => (A.user && ((A.user.user_metadata && (A.user.user_metadata.full_name || A.user.user_metadata.name)) || A.user.email)) || "";
+const acctHtml = () => !A.sb ? "" : A.user
+  ? `<div class="acct"><span><b>${esc(userName())}</b> 님</span><button class="link gray" data-logout>로그아웃</button></div>`
+  : `<div class="acct"><span>로그인하지 않았어요</span><button class="link" data-login>로그인</button></div>`;
+async function loadFavs() {
+  A.favs = new Set();
+  if (!A.user) return;
+  const { data } = await A.sb.from("user_favorite").select("cafe_id");
+  (data || []).forEach(r => A.favs.add(r.cafe_id));
+}
+async function setUser(u) {
+  A.user = u || null;
+  if (A.user) welcome.hidden = true;
+  await loadFavs();
+  if (["home", "saved", "detail"].includes(S.cur.view)) draw();
+}
+async function googleLogin() {
+  const { error } = await A.sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + location.pathname } });
+  if (error) $("#wErr").textContent = "로그인을 시작하지 못했어요: " + error.message;
+}
+async function toggleFav() {
+  const c = cafeById(S.selected);
+  if (!A.user) { welcome.hidden = false; return; }
+  const k = cafeKey(c); if (!k) return;
+  const on = A.favs.has(k);
+  const { error } = on ? await A.sb.from("user_favorite").delete().eq("cafe_id", k) : await A.sb.from("user_favorite").insert({ cafe_id: k });
+  if (error) return toast("저장하지 못했어요");
+  on ? A.favs.delete(k) : A.favs.add(k);
+  const b = $("[data-fav]"); if (b) { b.classList.toggle("on", !on); b.setAttribute("aria-pressed", String(!on)); }
+  toast(on ? "저장을 해제했어요" : "저장했어요");
+}
+function logSearch(q) {
+  if (!A.user) return;
+  A.sb.from("user_search_log").insert({ query: q.slice(0, 200) }).then(({ error }) => { if (error) console.warn("검색 기록 저장 실패:", error.message); });
+}
 
 /* ---------- 기록·취향 (이 기기에만 저장) ---------- */
 function pushHist(q, und) {
@@ -219,7 +261,7 @@ const V = {
     const nav = c.lat != null ? `https://map.kakao.com/link/to/${q},${c.lat},${c.lng}` : `https://map.kakao.com/link/search/${q}`;
     return `<div class="page detail" data-screen="detail">
       <div class="toprow"><button class="back" data-back>${S.results.length ? "← 후보 목록" : "← 뒤로"}</button><button class="link" data-showmap>지도에서 보기</button></div>
-      <div class="dname"><h2>${esc(c.name)} ${V.badge(c)}</h2>${c.address ? `<p class="addr">${esc(c.address)}</p>` : ""}</div>
+      <div class="dname"><div class="dtxt"><h2>${esc(c.name)} ${V.badge(c)}</h2>${c.address ? `<p class="addr">${esc(c.address)}</p>` : ""}</div>${A.sb ? V.heart(c) : ""}</div>
       <div class="info">
         ${n.mood ? `<p class="summary">${esc(n.mood.length > 110 ? n.mood.slice(0, 108) + "…" : n.mood)}</p>` : ""}
         <div class="rows">${row("clock", "시간", s.hours)}${row("seat", "좌석", s.seating)}${row("cup", "메뉴", s.menu)}${row("mood", "분위기", s.atmosphere)}</div>
@@ -235,6 +277,7 @@ const V = {
       <div class="foot"><span>${esc(TEXT.footLine)}</span><button type="button" data-sources>${esc(TEXT.footMore)}</button></div>
     </div>`;
   },
+  heart: c => `<button class="heart${A.favs.has(cafeKey(c)) ? " on" : ""}" data-fav aria-label="저장" aria-pressed="${A.favs.has(cafeKey(c))}">${ico("heart", "")}</button>`,
   photos: c => {
     const ps = c.photos || [];
     if (!ps.length) return `<div class="photos"><figure class="photo"><div class="ph empty">${ico("photo")}사진 준비 중</div></figure></div>`;
@@ -276,6 +319,20 @@ const V = {
     <p class="fine">마지막 업데이트 ${esc(DATA_UPDATED)}${TEXT.contact ? ` · 문의 ${esc(TEXT.contact)}` : ""}</p>
   </div>`,
 
+  /* 저장한 카페 (로그인 필요) */
+  saved: () => {
+    const list = S.all.filter(c => A.favs.has(cafeKey(c)));
+    return `<div class="page" data-screen="saved">
+      <div class="toprow"><button class="back" data-back>← 돌아가기</button></div>
+      <h2 class="pagetitle">저장한 카페</h2>
+      ${acctHtml()}
+      ${!A.sb ? '<p class="lead">로그인 기능을 쓸 수 없는 환경이에요.</p>'
+        : !A.user ? '<p class="lead">로그인하면 마음에 든 카페를 저장해 둘 수 있어요.</p><button class="go blue" data-login>Google로 로그인</button>'
+        : list.length ? `<ol class="cards">${list.map(V.card).join("")}</ol>`
+        : '<p class="lead">아직 저장한 카페가 없어요. 카페 상세에서 ♡ 저장하기를 눌러 보세요.</p>'}
+    </div>`;
+  },
+
   /* 최근 대화 전체보기 */
   history: () => `<div class="page" data-screen="history">
     <div class="toprow"><button class="back" data-back>← 돌아가기</button>${S.hist.length ? '<button class="link gray" data-clear>기록 지우기</button>' : ""}</div>
@@ -284,7 +341,7 @@ const V = {
       : '<p class="lead">아직 대화 기록이 없어요. 아래 표지판에 물어보세요.</p>'}
   </div>`,
 };
-const MODE = { home: "home", loading: "map", results: "map", error: "map", peek: "map", chat: "page", detail: "page", history: "page",
+const MODE = { home: "home", loading: "map", results: "map", error: "map", peek: "map", chat: "page", detail: "page", history: "page", saved: "page",
   feedback: "plain", "feedback-done": "plain", sources: "plain" };
 const cafeById = id => S.results.find(r => r.id === id) || S.all.find(r => r.id === id);
 
@@ -507,7 +564,7 @@ async function search(q) {
     if (!r.ok) throw new Error(j.error || `오류 (${r.status})`);
     S.results = j.results || []; S.understood = j.understood || []; S.notice = j.notice || "";
     if (!S.results.length) { drawMarkers(); S.cur = { view: "error", arg: S.notice || "조건에 맞는 카페를 찾지 못했어요. 다르게 물어봐 주세요." }; draw(); return; }
-    pushHist(q, S.understood);
+    pushHist(q, S.understood); logSearch(q);
     showResults(true);
   } catch (e) {
     if (my !== S.token) return;
@@ -604,6 +661,9 @@ document.addEventListener("click", e => {
   if (q) return search(q.dataset.q);
   const tip = t.closest("[data-tip]");
   if (tip) { qEl.value = tips()[+tip.dataset.tip].ex; setPh(); return qEl.focus(); }
+  if (t.closest("[data-login]")) { welcome.hidden = false; return; }
+  if (t.closest("[data-logout]")) { A.sb.auth.signOut(); return; }
+  if (t.closest("[data-fav]")) return toggleFav();
   if (t.closest("[data-home]")) return goHome();
   if (t.closest("[data-back]")) return back();
   if (t.closest("[data-showmap]")) return showOnMap();
@@ -619,7 +679,7 @@ document.addEventListener("click", e => {
     const id = nv.dataset.nav;
     if (id === "home") return goHome();
     if (id === "chat") return openChat();
-    if (id === "saved") return toast("저장 기능은 준비 중이에요");
+    if (id === "saved") return go("saved");
     if (id === "history") return go("history");
     if (id === "info") return go("sources");
   }
@@ -666,6 +726,15 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catc
   try {
     const [cfg, cafes] = await Promise.all([fetch("/api/config").then(r => r.json()), fetch("/api/cafes").then(r => r.json())]);
     S.all = cafes.cafes || [];
+    if (cfg.supabaseUrl && cfg.supabaseKey && window.supabase) {
+      A.sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey);
+      A.sb.auth.onAuthStateChange((_e, session) => { setTimeout(() => setUser(session && session.user), 0); });   // 콜백 안에서 바로 DB 호출하면 멈출 수 있어 한 박자 뒤에
+      const { data } = await A.sb.auth.getSession();
+      await setUser(data.session && data.session.user);
+      if (!A.user && !sessionStorage.getItem("guest")) welcome.hidden = false;
+      $("#gLogin").addEventListener("click", googleLogin);
+      $("#guest").addEventListener("click", () => { sessionStorage.setItem("guest", "1"); welcome.hidden = true; });
+    }
     if (S.cur.view === "home") draw();                  // 데이터가 오면 추천 카드를 채워요
     await loadKakao(cfg.kakaoKey);
     map = new kakao.maps.Map($("#map"), { center: new kakao.maps.LatLng(STATION.lat, STATION.lng), level: STATION.level });
