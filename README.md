@@ -111,3 +111,6 @@ vercel --prod
 python tools/import_supabase.py cafe_detail.json cafe_photo_rows.csv
 ```
 SQL 에디터에서 `select json_agg(t) from (select * from cafe_detail) t;` 결과를 UTF-8 JSON으로 저장해서 쓰세요 (엑셀로 열지 마세요).
+
+## 12. 변경 기록
+무엇을 보완하고 고쳤는지는 [CHANGELOG.md](CHANGELOG.md)에 있어요 (확률 채우기, 프랜차이즈, 정렬, 취향 화면, 시작 화면 등).
