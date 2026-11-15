@@ -11,6 +11,7 @@ API
   POST /api/search           {"query": "..."} -> 후보 최대 5곳
 """
 import json
+import math
 import os
 import re
 import sys
@@ -251,13 +252,94 @@ def public(c, rank=None, reason="", matched=None):
 # 흐름: 질문 --(LLM 번역 또는 규칙)--> flags --(코드가 데이터와 매칭)--> 후보 5곳
 FLAG_LABELS = {
     "open_now": "지금 영업 중", "late": "늦게까지 영업", "early": "아침 일찍 오픈",
-    "work": "작업·공부", "outlets": "콘센트", "group": "단체·여럿", "solo": "혼자",
+    "work": "작업·공부", "outlets": "콘센트", "wifi": "와이파이", "group": "단체·여럿", "solo": "혼자",
     "large": "넓은 좌석", "quiet": "조용함", "lively": "활기찬 분위기",
     "dessert": "디저트", "decaf": "디카페인",
 }
 FLAG_KEYS = tuple(FLAG_LABELS)
-STOPWORDS = {"카페", "안암", "안암동", "추천", "알려줘", "있는", "곳", "좋은", "해줘", "같은", "어디", "근처", "하는", "찾아줘", "보여줘", "가고", "싶어"}
+STOPWORDS = {"카페", "안암", "안암동", "추천", "알려줘", "있는", "곳", "좋은", "해줘", "같은", "어디", "근처", "하는", "찾아줘", "보여줘", "가고", "싶어",
+             "높은", "많은", "순으로", "가까운", "별점", "평점", "리뷰", "후기", "인기", "유명", "거리"}   # 정렬 선호 단어는 메뉴·분위기 매칭에서 제외
 KST = timezone(timedelta(hours=9))
+
+# ------------------------------------------------------- 확률 점수 (사전값 + 증거 → 확신도)
+# 거리 기준 위치: 앱이 현재 위치를 보내면 그걸 쓰고, 없으면 아래(테스트 가정: 고려대 정문)를 써요.
+HERE = (37.5896, 127.0322)     # (위도, 경도)
+SORTS = {"reviews": "리뷰 많은 순", "distance": "가까운 순", "rating": "별점 높은 순"}
+BAND = 0.85                    # 조건 점수가 1등의 85% 이상인 후보끼리만 정렬 선호(리뷰·거리·별점)로 다시 줄세워요
+# 속성 값이 '조건을 만족하는 정도'(0~1)와, 아무 정보가 없을 때의 기본 기대치(사전값)
+LEVEL = {
+    "outlet": ({"많음": 1, "있음": .8, "보통": .6, "적음": .3, "없음": 0}, .3),
+    "wifi": ({"1": 1, "0": 0}, .4),
+    "laptop": ({"1": 1, "0": 0}, .6),
+    "noise": ({"조용": 1, "보통": .35, "활기": .05, "시끌": .05, "북적": .05}, .3),    # 조용함 기준
+}
+NAME = {"outlet": "콘센트", "wifi": "와이파이", "laptop": "노트북", "noise": "소음"}
+_LEGACY_EXTRA = {"있음": "1", "없음": "0", "가능": "1", "제한": "0"}
+
+
+# 대형 프랜차이즈는 좌석이 넓고 콘센트·와이파이가 거의 항상 있어요 → 리뷰 근거가 없어도 높은 확신도를 줘요.
+# (컴포즈·빽다방·메가커피 같은 테이크아웃형 저가 매장은 제외. 늘리려면 이름만 추가)
+CHAINS = ("스타벅스", "투썸", "탐앤탐스", "커피빈", "할리스", "엔제리너스", "폴바셋")
+CHAIN_RULE = {"outlet": ("있음", .75), "wifi": ("1", .8)}      # 속성 → (값, 확신도)
+CHAIN_MIN_CONF = .5      # 이미 이 이상의 확신도로 값이 있으면(리뷰·직접 확인) 규칙으로 덮지 않아요
+
+
+def is_chain(c):
+    return any(n in (c.get("name") or "") for n in CHAINS)
+
+
+def _belief_src(c, key):
+    """(값, 확신도 0~1, 출처). 정보가 없으면 ('', 0, ''). 예전 형식 cafes.json(belief 없음)도 읽어요."""
+    b = (c.get("belief") or {}).get(key)
+    if b:
+        v, p = str(b.get("v") or ""), float(b.get("p") or 0)
+    elif "belief" in c:
+        v, p = "", 0.0
+    else:
+        e = c.get("extra") or {}
+        v = {"outlet": (c.get("seating") or {}).get("outlets"), "noise": (c.get("atmosphere") or {}).get("noise"),
+             "wifi": _LEGACY_EXTRA.get(e.get("와이파이")), "laptop": _LEGACY_EXTRA.get(e.get("노트북 작업"))}.get(key)
+        v, p = (str(v), 0.6) if v else ("", 0.0)
+    if key in CHAIN_RULE and is_chain(c) and not (v and p >= CHAIN_MIN_CONF):
+        return CHAIN_RULE[key] + ("프랜차이즈",)
+    return v, p, ""
+
+
+def _belief(c, key):
+    return _belief_src(c, key)[:2]
+
+
+def belief_p(c, key):
+    """조건을 만족할 확률 = 확신도×(값이 말하는 정도) + (1-확신도)×사전값. 정보 없으면 사전값 그대로. → (확률, 확신도)"""
+    levels, prior = LEVEL[key]
+    v, conf = _belief(c, key)
+    lvl = next((x for k, x in levels.items() if v.startswith(k)), None)
+    if lvl is None:
+        return prior, 0.0
+    return conf * lvl + (1 - conf) * prior, conf
+
+
+def _belief_label(key, v):
+    return {"outlet": f"콘센트 {v}", "wifi": "와이파이 " + ("있음" if v == "1" else "없음"),
+            "laptop": "노트북 " + ("가능" if v == "1" else "제한"), "noise": "조용" if v.startswith("조용") else f"소음 {v}"}[key]
+
+
+def _dist_m(lat1, lng1, lat2, lng2):
+    if None in (lat1, lng1, lat2, lng2):
+        return float("inf")
+    a = math.sin(math.radians(lat2 - lat1) / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(math.radians(lng2 - lng1) / 2) ** 2
+    return 12742000 * math.asin(math.sqrt(a))
+
+
+def _rating(c):
+    """카카오 별점을 리뷰 수로 보정(리뷰 1~3개짜리 5.0점이 위로 오지 않게): 평균 3.5점 10개를 섞어서 계산."""
+    st = c.get("stats") or {}
+    r, n = st.get("rating"), st.get("rating_n") or 0
+    return (n * r + 10 * 3.5) / (n + 10) if r else 3.5
+
+
+def _reviews(c):
+    return (c.get("stats") or {}).get("reviews") or 0
 
 
 def _hour(s):
@@ -281,17 +363,30 @@ def is_open_now(h, now=None):
 
 def describe_flags(f):
     """화면에 '이렇게 이해했어요' 칩으로 보여줄 조건 이름들."""
-    return [FLAG_LABELS[k] for k in FLAG_KEYS if f.get(k)] + list(f.get("words") or [])
+    return [FLAG_LABELS[k] for k in FLAG_KEYS if f.get(k)] + list(f.get("words") or []) + ([SORTS[f["sort"]]] if f.get("sort") else [])
+
+
+def rule_sort(q):
+    """'가까운 / 별점 높은 / 리뷰 많은' 같은 정렬 선호. 없으면 None."""
+    if any(w in q for w in ("가까", "가깝", "거리")):
+        return "distance"
+    if any(w in q for w in ("별점", "평점", "평가 좋")):
+        return "rating"
+    if any(w in q for w in ("리뷰", "후기", "인기", "유명")):
+        return "reviews"
+    return None
 
 
 def rule_parse(query):
     """LLM 없이 규칙으로 질문을 조건으로 바꿈 (키가 없을 때 / LLM 실패 시)."""
     q = query.lower()
     has = lambda *ws: any(w in q for w in ws)
-    tokens = [w for w in re.findall(r"[가-힣A-Za-z0-9]{2,}", q) if w not in STOPWORDS]
+    qm = re.sub(r"와이\s*파이|wifi|와파", " ", q)     # '와이파이' 속 '파이'가 디저트 파이로 맞는 걸 막아요
+    tokens = [w for w in re.findall(r"[가-힣A-Za-z0-9]{2,}", qm) if w not in STOPWORDS]
     f = {
         "work": has("작업", "공부", "노트북", "과제", "레포트", "리포트", "팀플", "코딩", "카공"),
         "outlets": has("콘센트"),
+        "wifi": has("와이파이", "wifi", "와이 파이", "와파"),
         "quiet": has("조용", "고요", "집중", "한적", "사람 없", "사람없", "붐비지", "차분"),
         "lively": has("시끌", "활기", "수다", "떠들"),
         "late": has("늦게", "야간", "밤", "심야", "24시", "새벽"),
@@ -304,19 +399,104 @@ def rule_parse(query):
         "decaf": has("디카페인"),
     }
     f = {k: (True if v else None) for k, v in f.items()}
+    f["sort"] = rule_sort(q)
     f["words"] = []              # 화면 칩에는 규칙이 확신한 조건만 보여줌
-    f["_match"] = tokens + [q]   # 메뉴·분위기 단어 매칭용
+    f["_match"] = tokens + [" ".join(qm.split())]   # 메뉴·분위기 단어 매칭용
     return f
 
 
-def rank_by_flags(f, cafes):
+# ------------------------------------------------------- 회원 취향 (가입 직후 고른 값 → 검색 조건에 합침)
+# (섹션, 항목 id) → 조건 이름. 데이터가 없는 항목(눈치 안 보임·데이트 등)은 화면에서 뺐어요. app.js 의 TASTE 와 id 가 같아야 해요.
+TASTE_FLAGS = {
+    ("why", "work"): "work", ("why", "study"): "group", ("why", "alone"): "solo", ("why", "dessert"): "dessert",
+    ("must", "plug"): "outlets", ("must", "wifi"): "wifi", ("must", "group"): "group", ("must", "pet"): "pet", ("must", "park"): "park",
+    ("noise", "quiet"): "quiet", ("noise", "talk"): "talk",
+    ("pain", "p_plug"): "outlets", ("pain", "p_noise"): "quiet", ("pain", "p_full"): "large",
+}
+TASTE_PRICE = {"p1": (0, 3001, "3,000원 이하"), "p2": (3001, 4501, "3,000~4,500원"), "p3": (4501, 10 ** 6, "4,500원 이상")}   # 아메리카노 가격 구간 [lo, hi)
+EXTRA_LABELS = {"pet": "반려동물 동반", "park": "주차", "talk": "적당한 대화 소리"}
+TASTE_SECTIONS = {}
+for _s, _i in list(TASTE_FLAGS) + [("price", p) for p in TASTE_PRICE]:
+    TASTE_SECTIONS.setdefault(_s, set()).add(_i)
+
+
+def clean_taste(d):
+    """앱이 보낸 취향 선택값을 믿지 않고, 정해진 항목 id 만 통과시켜요."""
+    if not isinstance(d, dict):
+        return {}
+    out = {}
+    for sec, ids in d.items():
+        if sec in TASTE_SECTIONS and isinstance(ids, list):
+            ok = [i for i in ids if isinstance(i, str) and i in TASTE_SECTIONS[sec]][:6]
+            if ok:
+                out[sec] = ok
+    return out
+
+
+def apply_taste(f, taste):
+    """회원 취향 → 보조 점수용 조건. 질문이 우선이라서, 질문에 이미 있는 조건은 빼고(중복), 질문과 부딪히는 소음 취향은 버려요.
+    → (취향 조건, 화면에 보일 칩 또는 None, 부딪혀서 뺀 취향 이름들)"""
+    qnoise = f.get("quiet") or f.get("lively")      # 질문이 소음 분위기를 직접 말했으면 취향의 소음 항목은 이번엔 안 써요
+    tf, labels, dropped = {}, [], []
+    for sec, ids in taste.items():
+        for i in ids:
+            if sec == "price":
+                lo, hi, name = TASTE_PRICE[i]
+                tf["price"] = (tf.get("price") or []) + [(lo, hi)]
+                lab = "아메리카노 " + name
+            else:
+                k = TASTE_FLAGS[(sec, i)]
+                lab = FLAG_LABELS.get(k) or EXTRA_LABELS[k]
+                if f.get(k):
+                    continue
+                if k in ("quiet", "talk") and qnoise:
+                    if lab not in dropped:
+                        dropped.append(lab)
+                    continue
+                tf[k] = True
+            if lab not in labels:
+                labels.append(lab)
+    chip = ("내 취향 · " + ", ".join(labels[:3]) + (f" 외 {len(labels) - 3}" if len(labels) > 3 else "")) if labels else None
+    return tf, chip, dropped
+
+
+def _lacks(c, item):
+    """'꼭 필요한 것'이 없다고 확인된 곳인지. 정보를 모르는 곳은 False → 제외하지 않고 점수만 낮아져요."""
+    ex = c.get("extra") or {}
+    if item == "plug":
+        v, p, _ = _belief_src(c, "outlet")
+        return v.startswith("없음") and p >= .5
+    if item == "wifi":
+        v, p, _ = _belief_src(c, "wifi")
+        return v == "0" and p >= .5
+    if item == "pet":
+        return str(ex.get("반려동물")) == "0"
+    if item == "park":
+        return str(ex.get("주차", "")).startswith("불가")
+    return False
+
+
+def _price(c):
+    m = re.search(r"\d[\d,]*", str((c.get("extra") or {}).get("아메리카노 가격", "")))
+    return int(m.group().replace(",", "")) if m else None
+
+
+RELIABLE = .6      # 확신도가 이 이상이면 '확인된 정보', 미만이면 '추정', 0이면 '정보 없음'
+MAX_UNSURE = 3     # 거리순 한 화면에 섞어 보여줄 '정보 부족' 카페 수 상한
+OPT_P = .8         # 거리순에서 '정보 없는' 속성을 이 확률로 가정해 후보를 넓혀요
+TASTE_W = .2       # 회원 취향은 질문으로 정해진 후보 '안에서' 순서만 가르는 보조 (별점·리뷰 점수에 더하는 비중)
+
+
+def _score_all(f, cafes):
+    """조건 f 로 카페마다 점수를 매겨요. → [{q: 점수, opt: 낙관 점수, id, c: 카페, why, unknown, levels: {항목: 확신도}, t: 취향 점수}]
+    levels 는 점수 비중이 큰(3점) 확률 속성만 담아요: 이게 추천순에서 '확실한 곳'을 가르는 기준이에요."""
     words = [w.lower() for w in (f.get("words") or []) + (f.get("_match") or []) if len(w) >= 2]
     now = datetime.now(KST)
     scored = []
     for c in cafes:
         h, s = c.get("hours") or {}, c.get("seating") or {}
         m, a = c.get("menu") or {}, c.get("atmosphere") or {}
-        score, why = 0.0, []
+        score, why, unknown, levels, opt = 0.0, [], [], {}, 0.0
 
         def hit(pts, label):
             nonlocal score
@@ -325,24 +505,42 @@ def rank_by_flags(f, cafes):
                 why.append(label)
 
         noise = str(a.get("noise") or "")
-        quiet, loud = noise.startswith("조용"), noise.startswith(("활기", "시끌", "북적"))
+        loud = noise.startswith(("활기", "시끌", "북적"))
+        # 콘센트·와이파이·노트북·조용함: 점수 = 가중치 × 조건을 만족할 확률 (확신도가 낮으면 사전값 쪽으로 끌려가요)
+        weights = {}
         if f.get("work") or f.get("outlets"):
-            o = s.get("outlets")
-            if o == "많음":
-                hit(3, "콘센트 많음")
-            elif o == "보통":
-                hit(1.5, "콘센트 보통")
-            elif o == "없음" and f.get("outlets"):
-                score -= 2
-        if f.get("work") and quiet:
-            hit(1, "조용")
+            weights["outlet"] = 3
+        if f.get("wifi"):
+            weights["wifi"] = 3
+        if f.get("work"):
+            weights["laptop"] = 1
         if f.get("quiet"):
-            if quiet:
-                hit(3, "조용")
-            elif loud:
-                score -= 2
+            weights["noise"] = 3
+        elif f.get("work"):
+            weights["noise"] = 1
+        for key, wt in weights.items():
+            p, conf = belief_p(c, key)
+            score += wt * p
+            if wt >= 3:
+                levels[key] = conf
+            if not conf:
+                opt += wt * (OPT_P - p)      # 거리순용 낙관 점수: 정보가 없는 속성은 '있다'고 가정했을 때의 점수
+                unknown.append(f"{NAME[key]} 정보 없음")
+            elif p >= 0.5:
+                v, _, src = _belief_src(c, key)
+                why.append(_belief_label(key, v) + (f" ({src})" if src else "" if conf >= RELIABLE else " (추정)"))
         if f.get("lively") and loud:
             hit(3, f"소음 {noise}")
+        # 회원 취향에서만 오는 조건: 값을 아는 곳만 점수를 주고, 모르는 곳은 0점(감점 없음)
+        ex = c.get("extra") or {}
+        if f.get("talk") and noise.startswith(("보통", "활기")):
+            hit(2, f"소음 {noise}")
+        if f.get("pet") and str(ex.get("반려동물")) == "1":
+            hit(3, "반려동물 동반")
+        if f.get("park") and str(ex.get("주차", "")).startswith("가능"):
+            hit(3, "주차 가능")
+        if f.get("price") and (pr := _price(c)) and any(lo <= pr < hi for lo, hi in f["price"]):
+            hit(2, f"아메리카노 {pr:,}원")
 
         o_, cl = _hour(h.get("open")), _hour(h.get("close"))
         if cl is not None and (cl <= 6 or (o_ is not None and cl <= o_)):
@@ -385,18 +583,83 @@ def rank_by_flags(f, cafes):
             if len(vl) >= 2 and any(vl in w or w in vl for w in words):
                 hit(2, _label(v))
 
-        scored.append((score, c["id"], c, why))
+        scored.append({"q": score, "opt": score + opt, "id": c["id"], "c": c, "why": why, "unknown": unknown, "levels": levels, "t": 0.0})
+    return scored
 
-    scored.sort(key=lambda x: (-x[0], x[1]))
+
+def _info(levels):
+    """카드에 붙일 정보 수준. 질문이 확률 속성(콘센트·와이파이·조용함)을 묻지 않았으면 None."""
+    if not levels:
+        return None
+    if all(v >= RELIABLE for v in levels.values()):
+        return "확인됨"
+    return "일부 추정" if all(v > 0 for v in levels.values()) else "정보 부족"
+
+
+def rank_by_flags(f, cafes, here=None, tf=None):
+    """f: 질문에서 읽은 조건, tf: 회원 취향 조건(보조). → (결과 카드들, 안내 문구)
+    추천순은 질문이 묻는 속성의 정보가 '확인된' 곳만, 거리순은 정보가 부족한 곳도 함께(정보 수준을 표시)."""
+    here = here or HERE
+    rows = _score_all(f, cafes)
+    if tf:      # 회원 취향은 보조: 질문 점수는 그대로 두고, 취향 점수만 따로 계산해 순서를 가를 때 써요
+        for r, rt in zip(rows, _score_all(tf, cafes)):
+            r["t"] = rt["q"]
+            r["why"] += [x for x in rt["why"] if x not in r["why"]]
+    sort, note = f.get("sort"), ""
+    far = sort == "distance"
+    sc = "opt" if far else "q"          # 거리순은 정보 없는 곳도 후보에 넣으려고 '낙관 점수'를 써요
+    if not far and any(r["levels"] for r in rows):     # 추천순: 질문이 묻는 속성이 '확인된' 곳만
+        sure = [r for r in rows if all(v >= RELIABLE for v in r["levels"].values())]
+        if not sure:
+            note = "확실한 정보가 있는 곳이 없어서 정보가 부족한 곳도 함께 보여드려요"
+        else:
+            if len(sure) < min(MAX_RESULTS, len(rows)):
+                note = f"확실한 정보가 있는 곳이 {len(sure)}곳뿐이에요. '거리순'에서는 정보가 부족한 곳도 볼 수 있어요"
+            rows = sure
+
+    # 1순위: 질문 점수. 점수가 비슷한(1등의 BAND 이상) 후보끼리만 정렬 선호로 다시 줄세워요 (조건이 안 맞는 곳이 인기 때문에 올라오지 않게).
+    rows.sort(key=lambda r: (-(r[sc] + TASTE_W * r["t"]), r["id"]))
+    top = max((r[sc] for r in rows), default=0)
+    band = [r for r in rows if top <= 0 or r[sc] >= top * BAND]
+    dist = lambda c: _dist_m(here[0], here[1], c.get("lat"), c.get("lng"))
+    key = {"distance": lambda r: (dist(r["c"]), r["id"]),
+           "rating": lambda r: (-_rating(r["c"]), -_reviews(r["c"]), r["id"]),
+           "reviews": lambda r: (-_reviews(r["c"]), -_rating(r["c"]), r["id"])}.get(
+        sort, lambda r: (-(_rating(r["c"]) + 0.5 * math.log10(1 + _reviews(r["c"])) + TASTE_W * r["t"]), r["id"]))   # 선호가 없으면 별점+리뷰 수(+취향)를 섞은 기본값
+    in_band = {r["id"] for r in band}
+    ordered = sorted(band, key=key) + [r for r in rows if r["id"] not in in_band]
+    if far:     # 거리순: '정보 부족'은 MAX_UNSURE곳까지만, 나머지는 가까운 확인된 곳으로 채워요 (모자라면 뒤에서 다시 채움)
+        unsure = lambda r: any(v < RELIABLE for v in r["levels"].values())
+        pick, n = [], 0
+        for r in ordered:
+            if unsure(r):
+                n += 1
+                if n > MAX_UNSURE:
+                    continue
+            pick.append(r)
+        ordered = pick + [r for r in ordered if r not in pick]
     out = []
-    for i, (score, _, c, why) in enumerate(scored[:MAX_RESULTS], 1):
-        reason = " · ".join(why[:3]) if why else "요청과 정확히 맞는 정보가 아직 없어요"
-        out.append(public(c, i, reason, why[:4]))
-    return out
+    for i, r in enumerate(ordered[:MAX_RESULTS], 1):
+        c, unknown = r["c"], r["unknown"]
+        extra = {"rating": lambda: f"별점 {_rating(c):.1f}", "reviews": lambda: f"리뷰 {_reviews(c)}건"}.get(sort, lambda: None)()
+        parts = ([extra] if extra else []) + r["why"]        # 정렬 기준(별점·리뷰 수)은 이유 맨 앞에. 거리는 카드에 항상 따로 표시해요(dist_m)
+        shown = parts[:3 - min(len(unknown), 1)] + unknown[:1]       # '정보 없음'은 잘리지 않게 한 자리를 비워 둬요
+        reason = " · ".join(shown) if shown else "요청과 정확히 맞는 정보가 아직 없어요"
+        item = public(c, i, reason, (parts + unknown)[:4])
+        item["info"] = _info(r["levels"])
+        d = dist(c)
+        if d != float("inf"):
+            item["dist_m"] = round(d)
+        out.append(item)
+    return out, note
 
 
-def keyword_rank(query, cafes):
-    return rank_by_flags(rule_parse(query), cafes)
+def fmt_m(m):
+    return f"{round(m / 10) * 10}m" if m < 1000 else f"{m / 1000:.1f}km"
+
+
+def keyword_rank(query, cafes, here=None):
+    return rank_by_flags(rule_parse(query), cafes, here)[0]
 
 
 def clean_flags(d):
@@ -410,6 +673,7 @@ def clean_flags(d):
         if 2 <= len(w) <= 12 and w not in words:
             words.append(w)
     f["words"] = words[:4]
+    f["sort"] = d.get("sort") if d.get("sort") in SORTS else None
     return f
 
 
@@ -424,6 +688,7 @@ def llm_parse(query):
         "- early: 아침 일찍(8시 이전) 여는 곳\n"
         "- work: 작업·공부·과제·카공·노트북 (콘센트가 필요하다는 뜻이면 outlets도 true)\n"
         "- outlets: 콘센트가 필요함\n"
+        "- wifi: 와이파이가 필요함\n"
         "- group: 여럿이/단체/팀플/모임\n"
         "- solo: 혼자 가는 곳\n"
         "- large: 넓거나 좌석이 많은 곳\n"
@@ -431,11 +696,12 @@ def llm_parse(query):
         "- lively: 활기차고 시끌벅적한 곳\n"
         "- dessert: 디저트·빵·케이크를 원함\n"
         "- decaf: 디카페인\n"
+        "- sort: 정렬 선호. 질문에 있을 때만 \"reviews\"(리뷰·후기 많은/인기), \"distance\"(가까운), \"rating\"(별점·평점 높은) 중 하나, 아니면 null\n"
         "- words: 질문에 나온 구체적인 메뉴·분위기 단어(예: 티라미수, 아인슈페너, 감성, 테라스), 최대 4개, 없으면 []\n"
         f"현재: {'월화수목금토일'[now.weekday()]}요일 {now:%H:%M}\n"
         f"질문: {json.dumps(query, ensure_ascii=False)}\n"
-        '출력 형식: {"open_now":null,"late":null,"early":null,"work":null,"outlets":null,"group":null,'
-        '"solo":null,"large":null,"quiet":null,"lively":null,"dessert":null,"decaf":null,"words":[]}'
+        '출력 형식: {"open_now":null,"late":null,"early":null,"work":null,"outlets":null,"wifi":null,"group":null,'
+        '"solo":null,"large":null,"quiet":null,"lively":null,"dessert":null,"decaf":null,"sort":null,"words":[]}'
     )
     text = call_llm(prompt).strip()
     text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.M).strip()
@@ -558,51 +824,80 @@ def has_info(c):
     )
 
 
-def search(query):
-    cafes = [c for c in load_cafes() if has_info(c)]
-    if not cafes:
+def search(query, here=None, sort=None, taste=None):
+    """sort: 이용자가 고른 정렬. 'distance'(거리순) / 'recommend'(추천순). None 이면 질문에서 읽은 선호를 따라요.
+    taste: 로그인 회원이 가입 때 고른 취향 {섹션: [항목 id]} (LLM 이 순위를 정하는 rank 모드에서는 쓰지 않아요)."""
+    now = datetime.now(KST)
+    allc = [c for c in load_cafes() if has_info(c)]
+    if not allc:
         return {"results": [], "source": "keyword",
                 "notice": "카페 데이터가 비어 있어요. data/cafes.json을 채워 주세요."}
-    key = (query.strip().lower(), CAFES_PATH.stat().st_mtime)
-    if key in _cache:
-        return _cache[key]
-
-    results, source, notice, understood = None, "keyword", "", []
-    if GEMINI_API_KEY:
+    # 지금(한국 시간) 영업이 끝났거나 쉬는 날인 곳은 추천에서 빼요. 영업시간을 모르는 곳은 남겨요.
+    cafes = [c for c in allc if is_open_now(c.get("hours") or {}, now) is not False]
+    q = query.strip().lower()
+    base = (q, CAFES_PATH.stat().st_mtime)
+    if LLM_MODE == "rank" and GEMINI_API_KEY:     # LLM 이 순위까지 정하는 모드: 영업 상황이 바뀌니 분 단위로만 캐시
+        key = base + (now.strftime("%Y%m%d%H%M"),)
+        if key in _cache:
+            return _cache[key]
         try:
-            if LLM_MODE == "rank":
-                results, source = llm_rank(query, cafes), "llm"
-            else:
+            payload = {"results": llm_rank(query, cafes), "source": "llm", "notice": "", "understood": [], "sort": "recommend"}
+            _cache[key] = payload
+            return payload
+        except Exception as e:
+            print("[search] LLM 랭킹 실패 → 키워드로:", repr(e), file=sys.stderr)
+
+    # 질문 → 조건 (LLM 번역은 캐시, 순위는 매번 새로 계산: 영업 중인 곳이 시간에 따라 바뀌니까)
+    if base in _cache:
+        flags, source, notice = _cache[base]
+        flags = dict(flags)
+    else:
+        flags, source, notice = None, "keyword", ""
+        if GEMINI_API_KEY:
+            try:
                 flags = llm_parse(query)
-                if any(flags.get(k) for k in FLAG_KEYS) or flags["words"]:
+                flags["sort"] = flags["sort"] or rule_sort(q)   # LLM이 놓친 정렬 선호는 규칙이 보충
+                if any(flags.get(k) for k in FLAG_KEYS) or flags["words"] or flags["sort"]:
                     source = "llm"
                 else:
-                    flags = rule_parse(query)   # LLM이 아무 조건도 못 뽑았으면 규칙으로
-                results, understood = rank_by_flags(flags, cafes), describe_flags(flags)
-        except urllib.error.HTTPError as e:
-            hint = {429: " · 한도 초과", 404: " · 모델 확인 필요", 400: " · 키/요청 확인", 403: " · 키 권한 확인"}.get(e.code, "")
-            notice = f"AI 호출 실패(HTTP {e.code}{hint}) → 키워드 매칭으로 대체"
-            try:
-                print("[LLM] Google 응답:", e.read().decode("utf-8", "ignore")[:400], file=sys.stderr)
-            except Exception:
-                pass
-        except Exception as e:  # 네트워크/파싱 오류 등
-            notice = f"AI 호출 실패({type(e).__name__}{' · 응답이 너무 느려요' if isinstance(e, TimeoutError) else ''}) → 키워드 매칭으로 대체"
-        if notice:
-            print("[search]", notice, file=sys.stderr)
-    else:
-        notice = "GEMINI_API_KEY가 비어 있어 키워드 매칭 모드예요"
+                    flags = None    # LLM이 아무 조건도 못 뽑았으면 규칙으로
+            except urllib.error.HTTPError as e:
+                hint = {429: " · 한도 초과", 404: " · 모델 확인 필요", 400: " · 키/요청 확인", 403: " · 키 권한 확인"}.get(e.code, "")
+                notice = f"AI 호출 실패(HTTP {e.code}{hint}) → 키워드 매칭으로 대체"
+                try:
+                    print("[LLM] Google 응답:", e.read().decode("utf-8", "ignore")[:400], file=sys.stderr)
+                except Exception:
+                    pass
+            except Exception as e:  # 네트워크/파싱 오류 등
+                notice = f"AI 호출 실패({type(e).__name__}{' · 응답이 너무 느려요' if isinstance(e, TimeoutError) else ''}) → 키워드 매칭으로 대체"
+            if notice:
+                print("[search]", notice, file=sys.stderr)
+        else:
+            notice = "GEMINI_API_KEY가 비어 있어 키워드 매칭 모드예요"
+        flags = flags or rule_parse(query)
+        if source == "llm" or not GEMINI_API_KEY:  # 실패 결과는 캐싱하지 않음
+            if len(_cache) > 200:
+                _cache.clear()
+            _cache[base] = (dict(flags), source, notice)
 
-    if results is None:
-        flags = rule_parse(query)
-        results, understood = rank_by_flags(flags, cafes), describe_flags(flags)
-    payload = {"results": results, "source": source, "notice": notice, "understood": understood}
-
-    if source == "llm" or not GEMINI_API_KEY:  # 실패 결과는 캐싱하지 않음
-        if len(_cache) > 200:
-            _cache.clear()
-        _cache[key] = payload
-    return payload
+    if sort == "distance":
+        flags["sort"] = "distance"
+    elif sort == "recommend":
+        flags["sort"] = None
+    understood = describe_flags(flags)
+    taste, tf, safe = clean_taste(taste), None, ""
+    if taste:       # 회원 취향(보조): 질문 조건과 따로 점수를 매겨 절반만 합치고, '꼭 필요'가 없다고 확인된 곳만 빼요
+        kept = [c for c in cafes if not any(_lacks(c, i) for i in taste.get("must", []))]
+        if len(kept) >= MAX_RESULTS:
+            cafes = kept
+        else:
+            safe = "취향의 '꼭 필요' 조건에 맞는 곳이 적어서 이번에는 조건을 풀었어요"
+        tf, chip, dropped = apply_taste(flags, taste)
+        understood += ([chip] if chip else []) + ([f"이번 질문과 달라 뺀 취향 · {', '.join(dropped)}"] if dropped else [])
+    results, note = rank_by_flags(flags, cafes, here, tf)
+    notice = " · ".join(x for x in (notice, safe, note) if x) or ("" if results else "지금 영업 중이면서 조건에 맞는 카페를 찾지 못했어요")
+    return {"results": results, "source": source, "notice": notice, "understood": understood,
+            "sort": "distance" if flags.get("sort") == "distance" else "recommend"}
 
 
 # ------------------------------------------------------------------ API (로컬 서버 / Vercel 공용)
@@ -639,15 +934,23 @@ def api_search(raw, length, ip="local"):
     if length > 4000:
         return 413, {"error": "요청이 너무 커요"}
     try:
-        query = str(json.loads(raw or b"{}").get("query", "")).strip()
+        body = json.loads(raw or b"{}")
+        query = str(body.get("query", "")).strip()
     except Exception:
         return 400, {"error": "잘못된 요청"}
+    here = None
+    try:
+        lat, lng = float(body["lat"]), float(body["lng"])          # 앱이 보낸 현재 위치 (선택)
+        if _dist_m(CENTER[1], CENTER[0], lat, lng) < 30000:         # 안암 30km 밖이면 무시 (엉뚱한 값 방지)
+            here = (lat, lng)
+    except (KeyError, TypeError, ValueError):
+        pass
     if not query:
         return 400, {"error": "검색어를 입력해주세요"}
     if rate_limited(ip):
         return 429, {"error": "요청이 너무 많아요. 잠시 후 다시 시도해주세요"}
     try:
-        return 200, search(query[:200])
+        return 200, search(query[:200], here, body.get("sort") if body.get("sort") in ("distance", "recommend") else None, body.get("taste"))
     except Exception as e:
         print("[search error]", repr(e), file=sys.stderr)
         return 500, {"error": f"검색 중 오류: {e}"}

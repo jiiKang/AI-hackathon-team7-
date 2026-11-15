@@ -84,19 +84,19 @@ const app = $("#app"), sheet = $("#sheet"), body = $("#body"), page = $("#page")
   sign = $("#sign"), qEl = $("#q"), phEl = $("#ph"), navEl = $("#nav"), toastEl = $("#toast");
 
 /* ---------- 상태 ---------- */
-const S = { all: [], results: [], understood: [], notice: "", query: "", selected: null, token: 0, here: null,
+const S = { all: [], results: [], understood: [], notice: "", query: "", selected: null, token: 0, here: null, sort: null,   // sort: 결과가 실제로 어떤 정렬인지(서버가 알려줌). 주소 검색은 null
   cur: { view: "home" }, stack: [], qa: {}, hist: store.get("hist", []) };
 let map = null, overlays = [], hereOverlay = null;
 
 /* ---------- 회원 (Supabase Auth · Google 로그인) ----------
    키가 없으면(A.sb 없음) 로그인 기능은 숨기고 예전처럼 동작해요. 회원별 데이터는 RLS 로 본인 것만 읽고 써요:
    user_profile(로그인 시 자동 생성) · user_favorite(저장한 카페) · user_search_log(검색 기록) */
-const A = { sb: null, user: null, favs: new Set() };
+const A = { sb: null, user: null, favs: new Set(), taste: null, tasteAsked: false };   // taste: { choices, skipped } (없으면 null)
 const welcome = $("#welcome");
 const cafeKey = c => c && c.src_id;                       // Supabase cafe.id (공공 매장 ID)
 const userName = () => (A.user && ((A.user.user_metadata && (A.user.user_metadata.full_name || A.user.user_metadata.name)) || A.user.email)) || "";
 const acctHtml = () => !A.sb ? "" : A.user
-  ? `<div class="acct"><span><b>${esc(userName())}</b> 님</span><button class="link gray" data-logout>로그아웃</button></div>`
+  ? `<div class="acct"><span><b>${esc(userName())}</b> 님</span><span><button class="link" data-taste>내 취향</button> <button class="link gray" data-logout>로그아웃</button></span></div>`
   : `<div class="acct"><span>로그인하지 않았어요</span><button class="link" data-login>로그인</button></div>`;
 async function loadFavs() {
   A.favs = new Set();
@@ -112,10 +112,51 @@ async function loadHist() {             // 로그인 계정에 저장된 이전 
   S.hist = [...S.hist, ...more].sort((a, b) => b.t - a.t).slice(0, 30);
   store.set("hist", S.hist);
 }
+/* ---------- 취향 분석: 가입 직후 한 번 고르고(건너뛰기 가능), 검색할 때 추천에 반영해요 ----------
+   질문은 실제로 데이터가 있는 항목만 넣었어요(눈치·데이트처럼 데이터가 없는 항목은 데이터가 쌓이면 추가). id 는 서버 cafe_core.TASTE_FLAGS 와 같아야 해요. */
+const TASTE = [
+  { id: "why", title: "카페에 가는 이유", multi: true, opts: [["work", "과제·작업", "💻"], ["study", "스터디·모임", "📚"], ["alone", "혼자 쉬기", "☕"], ["dessert", "디저트", "🍰"]] },
+  { id: "must", title: "꼭 필요한 것", multi: true, opts: [["plug", "콘센트", "🔌"], ["wifi", "와이파이", "📶"], ["group", "단체석", "👥"], ["pet", "반려동물 동반", "🐶"], ["park", "주차", "🚗"]] },
+  { id: "noise", title: "소음 취향", multi: false, opts: [["quiet", "조용한 곳", "🤫"], ["talk", "적당한 대화 소리", "🗣️"]] },
+  { id: "price", title: "아메리카노 가격대", multi: true, opts: [["p1", "3,000원 이하", "🏷️"], ["p2", "3,000~4,500원", "💵"], ["p3", "4,500원 이상", "💎"]] },
+  { id: "pain", title: "가장 불편했던 점", multi: true, opts: [["p_plug", "콘센트 찾기", "🔋"], ["p_noise", "시끄러움", "🔊"], ["p_full", "자리 없음", "💺"]] },
+];
+const TS = { sel: {}, step: "survey", first: false };       // 고르는 중인 값(섹션 → Set), 화면 단계, 가입 직후인지
+const tasteCount = () => TASTE.reduce((n, s) => n + TS.sel[s.id].size, 0);
+async function loadTaste() {
+  A.taste = null;
+  if (!A.user) return;
+  const { data, error } = await A.sb.from("user_taste").select("choices,skipped").maybeSingle();
+  if (error) { A.tasteAsked = true; return; }                // 읽지 못했으면 가입 직후 화면으로 착각해 띄우지 않아요
+  if (data) A.taste = { choices: data.choices || {}, skipped: !!data.skipped };
+}
+function openTaste(first) {
+  const have = (A.taste && A.taste.choices) || {};
+  TS.sel = Object.fromEntries(TASTE.map(s => [s.id, new Set((have[s.id] || []).filter(v => s.opts.some(o => o[0] === v)))]));
+  Object.assign(TS, { step: "survey", first: !!first });
+  go("taste");
+}
+function tasteToggle(b) {
+  const s = TASTE.find(x => x.id === b.dataset.ts), set = TS.sel[s.id], v = b.dataset.tv;
+  if (set.has(v)) set.delete(v); else { if (!s.multi) set.clear(); set.add(v); }
+  document.querySelectorAll(`[data-ts="${s.id}"]`).forEach(x => { const on = set.has(x.dataset.tv); x.classList.toggle("on", on); x.setAttribute("aria-pressed", String(on)); });
+  const n = tasteCount(); $("#tCount").textContent = n ? `${n}개 선택` : "선택해 주세요"; $("[data-tgo]").disabled = !n;
+}
+async function saveTaste(skipped) {
+  const choices = skipped ? {} : Object.fromEntries(TASTE.map(s => [s.id, [...TS.sel[s.id]]]).filter(x => x[1].length));
+  if (A.user) {
+    const { error } = await A.sb.from("user_taste").upsert({ user_id: A.user.id, choices, skipped, updated_at: new Date().toISOString() });
+    if (error) return toast("저장하지 못했어요. 잠시 후 다시 해 주세요");
+  }
+  A.taste = { choices, skipped };
+  toast(skipped ? "나중에 '내 취향'에서 고를 수 있어요" : "취향을 저장했어요. 추천에 반영할게요");
+  goHome();
+}
 async function setUser(u) {
   A.user = u || null;
-  if (A.user) welcome.hidden = true;
-  await Promise.all([loadFavs(), loadHist()]);
+  if (A.user) { if (!welcome.classList.contains("loading")) welcome.hidden = true; } else A.tasteAsked = false;   // 로딩 중이면 startDone 이 시간 맞춰 닫아요
+  await Promise.all([loadFavs(), loadHist(), loadTaste()]);
+  if (A.user && !A.taste && !A.tasteAsked && S.cur.view === "home") { A.tasteAsked = true; return openTaste(true); }   // 가입 직후(저장된 취향 없음) 한 번만
   if (["home", "saved", "detail"].includes(S.cur.view)) draw();
 }
 async function googleLogin() {
@@ -218,7 +259,9 @@ const V = {
     <div class="rhead">
       <div class="rtitle"><b>“<span class="q">${esc(S.query)}</span>”</b><button class="link gray" data-home>처음으로</button></div>
       ${S.understood.length ? `<div class="und">이렇게 이해했어요 ${S.understood.map(u => `<span class="c">${esc(u)}</span>`).join("")}</div>` : ""}
+      ${S.sort ? `<div class="sortbar"><button type="button" data-sort="recommend"${S.sort === "recommend" ? ' class="on"' : ""}>추천순</button><button type="button" data-sort="distance"${S.sort === "distance" ? ' class="on"' : ""}>거리순</button><span class="hint">거리는 ${S.me ? "내 위치" : "고려대 정문"} 기준</span></div>` : ""}
       ${S.notice ? `<span class="notice">${esc(S.notice)}</span>` : ""}
+      ${S.sort && A.taste && !A.taste.skipped && Object.keys(A.taste.choices || {}).length ? `<button type="button" class="link gray" data-notaste>${S.noTaste ? "내 취향 다시 적용하기" : "이번엔 내 취향 빼고 찾기"}</button>` : ""}
     </div>
     <ol class="cards">${S.results.map(V.card).join("")}</ol>
     <div class="sheetfoot"><span>${esc(TEXT.footLine)}</span><button type="button" data-sources>${esc(TEXT.footMore)}</button></div>
@@ -231,13 +274,14 @@ const V = {
       <span class="rank">${c.rank || ""}</span>
       <div class="cmain">
         <div class="cname">${esc(c.name)}</div>
-        <div class="meta">${V.badge(c)}${c.summary && c.summary.hours ? `<span>${esc(c.summary.hours)}</span>` : ""}</div>
+        <div class="meta">${V.badge(c)}${V.info(c)}${c.dist_m != null ? `<span class="dist">${fmtM(c.dist_m)}</span>` : ""}${c.summary && c.summary.hours ? `<span>${esc(c.summary.hours)}</span>` : ""}</div>
         ${reason ? `<div class="reason">${esc(reason)}</div>` : ""}
         ${chips.length ? `<div class="kw">${chips.map(k => `<span>${esc(k)}</span>`).join("")}</div>` : ""}
       </div>
       ${ph ? `<div class="thumb"><img src="${esc(safeUrl(ph.url))}" alt="" loading="lazy" referrerpolicy="no-referrer"></div>` : ""}
     </li>`;
   },
+  info: c => c.info ? `<span class="badge lv ${{ "확인됨": "ok", "일부 추정": "mid", "정보 부족": "low" }[c.info] || ""}" title="질문한 조건의 정보가 얼마나 확실한지">${esc(c.info)}</span>` : "",   // 서버가 정한 정보 수준
   badge: c => c.open_now === true ? '<span class="badge open">영업 중</span>' : c.open_now === false ? '<span class="badge closed">영업 종료</span>' : "",
 
   /* 결과 없음 / 오류 */
@@ -327,6 +371,32 @@ const V = {
     <p class="fine">마지막 업데이트 ${esc(DATA_UPDATED)}${TEXT.contact ? ` · 문의 ${esc(TEXT.contact)}` : ""}</p>
   </div>`,
 
+  /* 취향 분석 (가입 직후 · 내 취향) */
+  taste: () => {
+    if (TS.step === "result") {
+      const pick = (id, f) => [...TS.sel[id]].map(v => { const o = TASTE.find(s => s.id === id).opts.find(x => x[0] === v); return `<span>${o[2]} ${esc(f ? f(o[1]) : o[1])}</span>`; }).join("");
+      const must = pick("must"), prefer = pick("why") + pick("noise") + pick("price", t => "아메리카노 " + t), pain = pick("pain");
+      const block = (t, h, cls) => h ? `<section class="tsec"><h3>${t}</h3><div class="ttags ${cls}">${h}</div></section>` : "";
+      return `<div class="page" data-screen="taste">
+        <div class="toprow"><span></span></div>
+        <h2 class="pagetitle">이런 기준으로<br>찾아드릴게요</h2>
+        <p class="lead">검색할 때마다 이 기준이 같이 반영돼요. 질문에 직접 쓴 조건도 그대로 지켜요.</p>
+        ${block("꼭 필요한 조건", must, "must")}${block("가능하면 맞는 곳", prefer, "")}${block("불편했던 점은 더 신경 써요", pain, "")}
+        <p class="fine">“꼭 필요”는 없다고 확인된 카페만 빼요. 정보가 아직 없는 카페는 그대로 보여주고 점수만 달라져요.</p>
+        <div class="tbar"><button class="btn2" data-tredo>다시 고르기</button><button class="go blue" data-tsave>이 기준으로 찾기</button></div>
+      </div>`;
+    }
+    const n = tasteCount();
+    return `<div class="page" data-screen="taste">
+      <div class="toprow"><span></span>${TS.first ? '<button class="link gray" data-tskip>건너뛰기</button>' : '<button class="link gray" data-back>닫기</button>'}</div>
+      <h2 class="pagetitle">당신의 카페 취향,<br>먼저 찾아볼까요?</h2>
+      <p class="lead">고른 만큼 추천이 정확해져요. 아직 모르겠으면 넘어가도 돼요.</p>
+      ${TASTE.map(s => `<section class="tsec"><h3>${esc(s.title)}<small>${s.multi ? "복수 선택" : "하나만"}</small></h3><div class="seg" role="group">${s.opts.map(o => {
+        const on = TS.sel[s.id].has(o[0]); return `<button type="button" data-ts="${s.id}" data-tv="${o[0]}" aria-pressed="${on}" class="${on ? "on" : ""}">${o[2]} ${esc(o[1])}</button>`; }).join("")}</div></section>`).join("")}
+      <div class="tbar"><span class="tcount" id="tCount">${n ? `${n}개 선택` : "선택해 주세요"}</span><button class="go blue" data-tgo${n ? "" : " disabled"}>내 기준 보기</button></div>
+    </div>`;
+  },
+
   /* 저장한 카페 (로그인 필요) */
   saved: () => {
     const list = S.all.filter(c => A.favs.has(cafeKey(c)));
@@ -350,7 +420,7 @@ const V = {
   </div>`,
 };
 const MODE = { home: "home", loading: "map", results: "map", error: "map", peek: "map", chat: "page", detail: "page", history: "page", saved: "page",
-  feedback: "plain", "feedback-done": "plain", sources: "plain" };
+  feedback: "plain", "feedback-done": "plain", sources: "plain", taste: "plain" };
 const cafeById = id => S.results.find(r => r.id === id) || S.all.find(r => r.id === id);
 
 /* ---------- 화면 그리기 / 이동 ---------- */
@@ -396,7 +466,7 @@ window.addEventListener("popstate", () => {
 
 function goHome() {                     // 처음 화면 (검색 결과·선택·입력 모두 비움)
   S.token++;
-  Object.assign(S, { results: [], understood: [], notice: "", query: "", selected: null, here: null, stack: [], cur: { view: "home" } });
+  Object.assign(S, { results: [], understood: [], notice: "", query: "", selected: null, here: null, sort: null, stack: [], cur: { view: "home" } });
   qEl.value = ""; qEl.blur();
   drawMarkers(); resetMap();
   draw(); snapTo("home");
@@ -493,7 +563,7 @@ function placeLocate() { locBtn.style.bottom = (curH + 14) + "px"; }
 locBtn.addEventListener("click", () => {
   if (!navigator.geolocation) return toast("이 기기에서는 위치를 쓸 수 없어요");
   navigator.geolocation.getCurrentPosition(p => {
-    S.here = { lat: p.coords.latitude, lng: p.coords.longitude }; drawMarkers();
+    S.here = { lat: p.coords.latitude, lng: p.coords.longitude }; S.me = S.here; drawMarkers();   // S.me: 검색할 때 서버로 보내 거리 정렬에 써요
     if (map) { map.setCenter(new kakao.maps.LatLng(S.here.lat, S.here.lng)); map.setLevel(4); }
   }, () => toast("위치 권한을 허용해 주세요"), { enableHighAccuracy: true, timeout: 8000 });
 });
@@ -558,21 +628,21 @@ function resetMap() {
 /* =====================================================================
    동작: 검색 · 주소 검색 · 질문 · 정보 수정
    ===================================================================== */
-async function search(q) {
+async function search(q, pick = null, noTaste = false) {      // pick: 이용자가 정렬 버튼으로 고른 값("recommend" | "distance"), noTaste: 이번만 취향 빼고. 새 검색이면 둘 다 기본값
   q = (q || "").trim();
   if (!q) return;
   const my = ++S.token;
-  S.query = q; S.selected = null; S.here = null; qEl.blur();
+  S.query = q; S.selected = null; S.here = null; S.pick = pick; S.noTaste = noTaste; qEl.blur();
   S.stack = [{ view: "home" }]; S.cur = { view: "loading", arg: q };
   qEl.value = q; draw(); snapTo("mid");
   try {
-    const r = await fetch("/api/search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: q }) });
+    const r = await fetch("/api/search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: q, ...(pick ? { sort: pick } : {}), ...(A.taste && !A.taste.skipped && !noTaste ? { taste: A.taste.choices } : {}), ...(S.me || {}) }) });
     const j = await r.json().catch(() => ({}));
     if (my !== S.token) return;                         // 그 사이 처음으로/다른 검색을 눌렀으면 무시
     if (!r.ok) throw new Error(j.error || `오류 (${r.status})`);
-    S.results = j.results || []; S.understood = j.understood || []; S.notice = j.notice || "";
+    S.results = j.results || []; S.understood = j.understood || []; S.notice = j.notice || ""; S.sort = j.sort || "recommend";
     if (!S.results.length) { drawMarkers(); S.cur = { view: "error", arg: S.notice || "조건에 맞는 카페를 찾지 못했어요. 다르게 물어봐 주세요." }; draw(); return; }
-    pushHist(q, S.understood); logSearch(q);
+    if (!pick && !noTaste) { pushHist(q, S.understood); logSearch(q); }   // 정렬·취향만 바꾼 재검색은 기록에 또 남기지 않아요
     showResults(true);
   } catch (e) {
     if (my !== S.token) return;
@@ -601,14 +671,14 @@ async function searchAddress(text) {    // 홈 아래 검색창: 주소로 찾�
   text = (text || "").trim();
   if (!text) return;
   const my = ++S.token;
-  S.query = text; S.selected = null; S.stack = [{ view: "home" }]; S.cur = { view: "loading", arg: text };
+  S.query = text; S.selected = null; S.sort = null; S.stack = [{ view: "home" }]; S.cur = { view: "loading", arg: text };
   qEl.value = ""; draw(); snapTo("mid");
   const pt = await geocode(text);
   if (my !== S.token) return;
   let list = [];
   if (pt) {
     S.here = pt;
-    list = S.all.filter(c => c.lat != null).map(c => ({ ...c, _d: meters(pt.lat, pt.lng, c.lat, c.lng) })).sort((a, b) => a._d - b._d).slice(0, 5)
+    list = S.all.filter(c => c.lat != null && c.open_now !== false)     // 지금 영업이 끝난 곳은 빼요.map(c => ({ ...c, _d: meters(pt.lat, pt.lng, c.lat, c.lng) })).sort((a, b) => a._d - b._d).slice(0, 5)
       .map((c, i) => ({ ...c, rank: i + 1, matched: [fmtM(c._d)], reason: "" }));
   } else {                              // 지도 검색을 못 쓰면 우리 카페 주소·이름에서 글자 찾기
     S.here = null;
@@ -679,9 +749,19 @@ document.addEventListener("click", e => {
   if (q) return search(q.dataset.q);
   const tip = t.closest("[data-tip]");
   if (tip) { qEl.value = tips()[+tip.dataset.tip].ex; setPh(); return qEl.focus(); }
+  const ts = t.closest("[data-ts]");
+  if (ts) return tasteToggle(ts);
+  if (t.closest("[data-tgo]")) { TS.step = "result"; return draw(); }
+  if (t.closest("[data-tredo]")) { TS.step = "survey"; return draw(); }
+  if (t.closest("[data-tsave]")) return saveTaste(false);
+  if (t.closest("[data-tskip]")) return saveTaste(true);
+  if (t.closest("[data-taste]")) return openTaste(false);
   if (t.closest("[data-login]")) { welcome.hidden = false; return; }
   if (t.closest("[data-logout]")) { A.sb.auth.signOut(); return; }
   if (t.closest("[data-fav]")) return toggleFav();
+  const so = t.closest("[data-sort]");
+  if (so) return search(S.query, so.dataset.sort, S.noTaste);     // 같은 질문을 고른 정렬로 다시
+  if (t.closest("[data-notaste]")) return search(S.query, S.pick, !S.noTaste);   // 이번만 취향 끄기/켜기
   if (t.closest("[data-home]")) return goHome();
   if (t.closest("[data-back]")) return back();
   if (t.closest("[data-showmap]")) return showOnMap();
@@ -742,6 +822,14 @@ document.addEventListener("scroll", e => {
 /* ---------- 시작 ---------- */
 navEl.innerHTML = NAV.map(n => `<button type="button" data-nav="${n.id}" aria-label="${esc(n.label)}">${ico(n.icon, "")}</button>`).join("");
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+/* 시작 화면 로딩 끝: 로그인돼 있거나 둘러보기를 골랐거나 로그인 기능이 없으면 바로 메인으로, 아니면 로그인 버튼을 보여줘요 */
+const SPLASH_MS = 1500;     // 로딩이 아무리 빨라도 페이지가 열린 뒤 이 시간까지는 시작 화면을 보여줘요
+function startDone() {
+  setTimeout(() => {
+    welcome.classList.remove("loading");
+    welcome.hidden = !!(A.user || !A.sb || sessionStorage.getItem("guest"));
+  }, Math.max(0, SPLASH_MS - performance.now()));       // performance.now() = 페이지가 열린 뒤 지난 ms
+}
 (async function init() {
   fitViewport();
   draw(); setH(SN.home, false); app.dataset.snap = "home";
@@ -753,15 +841,16 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catc
       A.sb.auth.onAuthStateChange((_e, session) => { setTimeout(() => setUser(session && session.user), 0); });   // 콜백 안에서 바로 DB 호출하면 멈출 수 있어 한 박자 뒤에
       const { data } = await A.sb.auth.getSession();
       await setUser(data.session && data.session.user);
-      if (!A.user && !sessionStorage.getItem("guest")) welcome.hidden = false;
       $("#gLogin").addEventListener("click", googleLogin);
       $("#guest").addEventListener("click", () => { sessionStorage.setItem("guest", "1"); welcome.hidden = true; });
     }
     if (S.cur.view === "home") draw();                  // 데이터가 오면 추천 카드를 채워요
+    startDone();
     await loadKakao(cfg.kakaoKey);
     map = new kakao.maps.Map($("#map"), { center: new kakao.maps.LatLng(STATION.lat, STATION.lng), level: STATION.level });
     drawMarkers();
   } catch (e) {
+    startDone();
     $("#map").innerHTML = `<div class="mapmsg">${esc(e.message)}</div>`;
   }
 })();
