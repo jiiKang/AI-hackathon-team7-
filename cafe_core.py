@@ -216,7 +216,7 @@ def notes(c):
 
 
 def _photos(c):
-    """사진은 '출처'가 있어야 보여줌: 출처 링크(source) 또는 직접 촬영 표기(credit). 최대 2장."""
+    """사진은 '출처'가 있어야 보여줌: 출처 링크(source) 또는 직접 촬영 표기(credit). 최대 4장."""
     out = []
     for p in c.get("photos") or []:
         p = {"url": p} if isinstance(p, str) else (p or {})
@@ -226,7 +226,7 @@ def _photos(c):
         src = src if src.startswith(("http://", "https://")) else ""
         if src or credit:
             out.append({"url": url, "source": src, "credit": credit[:40]})
-    return out[:2]
+    return out[:4]
 
 
 def basis(c):
@@ -650,6 +650,98 @@ def api_search(raw, length, ip="local"):
         return 500, {"error": f"검색 중 오류: {e}"}
 
 
+# ------------------------------------------------------------------ 카페 상세에서 이어서 질문하기 ("여기 말차라떼도 팔아?")
+# 그 카페 1곳의 데이터만 보고 답해요. 데이터에 없으면 "확인되지 않았어요"라고 말해요 (지어내지 않음).
+_ENDINGS = re.compile(r"(에서는|에서도|에서|이랑|이나|이면|으로|도|은|는|이|가|을|를|에|랑|나|야|요|까|니|도|만|좀)$")
+_ASK_STOP = {"여기", "거기", "이곳", "있나", "있어", "있나요", "있어요", "팔아", "팔아요", "되나", "되나요", "되나요", "가능", "가능해",
+             "가능한가요", "알려줘", "알려", "어때", "어떄", "카페", "혹시", "그리고", "또", "그럼", "하나요", "해요", "해", "돼", "돼요", "있니"}
+
+
+def _cafe_text(c):
+    m, a, s, e = c.get("menu") or {}, c.get("atmosphere") or {}, c.get("seating") or {}, c.get("extra") or {}
+    parts = [*_list(m.get("signature")), *_list(m.get("desserts")), *_list(m.get("drinks")), *_list(a.get("tags")),
+             str(a.get("note") or ""), str(s.get("note") or ""), str(s.get("outlet_note") or "")]
+    parts += [f"{k} {v}" for k, v in e.items()]
+    return [p for p in parts if p]
+
+
+def rule_answer(c, q):
+    """키워드 규칙으로 답하기 (AI 키가 없거나 실패했을 때)."""
+    h, s, e, a = c.get("hours") or {}, c.get("seating") or {}, c.get("extra") or {}, c.get("atmosphere") or {}
+    sm = summarize(c)
+    name = c.get("name", "이 카페")
+    if re.search(r"영업|열었|열어|닫|몇\s*시|언제까지|마감|오픈|휴무|쉬", q):
+        op = is_open_now(h)
+        now = "지금은 영업 중이에요. " if op is True else "지금은 영업 시간이 아니에요. " if op is False else ""
+        return (now + (sm.get("hours") or "영업시간 정보가 아직 없어요") + (f" ({h['note']})" if h.get("note") else ""))[:220]
+    for pat, key, label in ((r"콘센트|충전", "outlets", "콘센트"),):
+        if re.search(pat, q):
+            return f"{label}는 '{s['outlets']}'로 정리돼 있어요." + (f" {s['outlet_note']}" if s.get("outlet_note") else "") if s.get(key) else "콘센트 정보는 아직 확인되지 않았어요."
+    if re.search(r"좌석|자리|단체|넓|인원|몇\s*명", q):
+        return sm.get("seating") or "좌석 정보는 아직 확인되지 않았어요."
+    if re.search(r"조용|시끄|소음|분위기", q):
+        return (sm.get("atmosphere") or "분위기 정보는 아직 확인되지 않았어요.")
+    for key, pat in (("주차", r"주차"), ("와이파이", r"와이파이|wifi|와이"), ("예약", r"예약"), ("반려동물", r"반려|강아지|고양이|동물"),
+                     ("포장·배달", r"포장|배달|테이크"), ("디카페인", r"디카페인"), ("아메리카노 가격", r"가격|얼마|아메리카노")):
+        if re.search(pat, q, re.I):
+            return f"{key}: {e[key]}" if e.get(key) else f"{key} 정보는 아직 확인되지 않았어요."
+    toks = []
+    for t in re.findall(r"[가-힣A-Za-z0-9]{2,}", q):
+        t = _ENDINGS.sub("", t)
+        if len(t) >= 2 and t not in _ASK_STOP:
+            toks.append(t)
+    text = _cafe_text(c)
+    for t in toks:
+        hit = [x for x in text if t in x]
+        if hit:
+            return f"'{t}' 관련해서 데이터에 이렇게 있어요: {_label(hit[0]) if len(hit[0]) > 30 else hit[0]}"[:220]
+    if toks:
+        return f"'{toks[0]}' 정보는 이 카페 데이터에서 확인되지 않았어요. 매장에 직접 문의해 보세요."
+    return "무엇이 궁금하세요? 영업시간, 좌석, 메뉴처럼 물어봐 주세요."
+
+
+def llm_answer(c, q):
+    data = {"이름": c.get("name"), "주소": c.get("address"), "영업시간": c.get("hours"), "좌석": c.get("seating"),
+            "메뉴": c.get("menu"), "분위기": c.get("atmosphere"), "부가정보": c.get("extra")}
+    prompt = ("너는 카페 안내 도우미야. 아래 [카페 데이터]에 있는 내용만 근거로 질문에 한국어로 1~2문장, 친근한 존댓말로 답해.\n"
+              "데이터에 없으면 지어내지 말고 '데이터에서 확인되지 않았어요. 매장에 문의해 보세요'라고 답해. 현재 시각은 "
+              f"{datetime.now(KST).strftime('%H:%M')}이야.\n[카페 데이터]\n{json.dumps(data, ensure_ascii=False)[:3500]}\n"
+              f"[질문]\n{q}\n\nJSON으로만 답해: {{\"answer\": \"...\"}}")
+    out = json.loads(call_llm(prompt))
+    ans = str(out.get("answer", "")).strip()
+    if not ans:
+        raise ValueError("빈 답변")
+    return ans[:300]
+
+
+def api_ask(raw, length, ip="local"):
+    if length > 4000:
+        return 413, {"error": "질문이 너무 길어요"}
+    try:
+        d = json.loads(raw or b"{}")
+        assert isinstance(d, dict)
+    except Exception:
+        return 400, {"error": "잘못된 요청"}
+    q = str(d.get("question", "")).strip()[:200]
+    if not q:
+        return 400, {"error": "질문을 입력해주세요"}
+    cafe = next((c for c in load_cafes() if str(c["id"]) == str(d.get("cafe_id"))), None)
+    if not cafe:
+        return 400, {"error": "카페를 찾을 수 없어요"}
+    if rate_limited(ip, "ask", 20):
+        return 429, {"error": "요청이 너무 많아요. 잠시 후 다시 시도해주세요"}
+    source = "rule"
+    try:
+        if not GEMINI_API_KEY:
+            raise RuntimeError("no key")
+        ans, source = llm_answer(cafe, q), "llm"
+    except Exception as e:
+        if GEMINI_API_KEY:
+            print("[ask] AI 실패 → 규칙 답변:", repr(e), file=sys.stderr)
+        ans = rule_answer(cafe, q)
+    return 200, {"answer": ans, "source": source}
+
+
 # ------------------------------------------------------------------ 정보 수정 제안 (사용자 피드백)
 FEEDBACK_WEBHOOK_URL = os.environ.get("FEEDBACK_WEBHOOK_URL", "").strip()   # ★ (선택) 구글 Apps Script 웹앱 주소 → 구글시트에 쌓임 (README 참고)
 FEEDBACK_LOG = ROOT / "data" / "feedback.jsonl"                              # 로컬 실행 시 여기에도 저장
@@ -728,7 +820,7 @@ class Handler(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def do_POST(self):
-        route = {"/api/search": api_search, "/api/feedback": api_feedback}.get(self.path.split("?")[0])
+        route = {"/api/search": api_search, "/api/feedback": api_feedback, "/api/ask": api_ask}.get(self.path.split("?")[0])
         if not route:
             return self._json({"error": "not found"}, 404)
         n = int(self.headers.get("Content-Length") or 0)

@@ -2,24 +2,52 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <title>안암 카페 챗</title>
+<meta name="theme-color" content="#3659c8">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="안암카페">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
 <!-- 디자인(색·글자·간격·모양)은 styles.css, 문구·화면 구성은 app.js 에서 바꿔요 -->
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<div id="map"></div>
+<div id="app" data-mode="home">
+  <div id="map"></div>
 
-<section id="sheet" aria-label="카페 검색" data-view="home">
-  <div class="grab" id="grab" data-drag><i></i></div>
-  <div class="body" id="body"></div>
-  <form class="bar" id="form" autocomplete="off">
-    <input id="q" type="text" enterkeyhint="search" maxlength="120" aria-label="검색어">
-    <button type="submit" aria-label="검색"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4-4"/></svg></button>
+  <!-- 지도 위 하단 시트 (홈 · 검색 결과) -->
+  <section id="sheet" aria-label="카페" data-view="home">
+    <div class="hazard" id="grab" data-drag aria-hidden="true"></div>
+    <div class="body" id="body"></div>
+  </section>
+
+  <!-- 전체 화면 페이지 (채팅 · 카페 상세 · 정보 수정 · 출처 · 기록) -->
+  <section id="page" aria-label="상세" hidden>
+    <div class="pbody" id="pbody"></div>
+  </section>
+
+  <!-- 하단 둥근 메뉴 (홈에서만) -->
+  <nav id="nav" aria-label="메뉴"></nav>
+
+  <!-- 도로 표지판 입력창: 홈에서는 위, 그 외에는 아래 -->
+  <form id="sign" class="sign" autocomplete="off">
+    <span class="rail" aria-hidden="true"></span>
+    <div class="face">
+      <div class="field">
+        <input id="q" type="text" enterkeyhint="search" maxlength="120" aria-label="검색어" readonly>
+        <span id="ph" class="sph"></span>
+      </div>
+      <button type="submit" class="tip" aria-label="보내기"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
+    </div>
   </form>
-  <footer class="foot" id="foot"></footer>
-</section>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+</div>
 
 <script src="app.js"></script>
 </body>

@@ -6,7 +6,7 @@ Supabase(cafe_detail 뷰 + cafe_photo 테이블) → data/cafes.json 변환기. 
   python tools/import_supabase.py cafe_detail.csv  cafe_photo.csv   (CSV 도 되지만 JSON 을 권장 — attrs 열이 JSON 이라 엑셀에서 깨지기 쉬워요)
 
 - cafe_detail: JSON 배열 또는 CSV (열: id, name, address, lat, lng, trust_grade, attrs, review_total ...)
-- cafe_photo : CSV (열: cafe_id, slot, image_url, source_url, url_status ...)  → url_status 가 ok 인 것만, 슬롯 1·2 사용
+- cafe_photo : CSV (열: cafe_id, slot, image_url, source_url, url_status ...)  → url_status 가 ok 인 것만, 슬롯 1~4 사용 (최대 4장)
 - 앱의 카페 id 는 1,2,3… 순번이고, 원래 id 는 "src_id" 로 남겨요.
 """
 import argparse
@@ -135,9 +135,9 @@ def attach_photos(cafes, photo_rows):
     rows.sort(key=lambda p: int(p.get("slot") or 9))
     for p in rows:
         c = by.get(p.get("cafe_id"))
-        if not c or len(c["photos"]) >= 2:
+        if not c or len(c["photos"]) >= 4:
             continue
-        if p.get("slot") not in ("1", "2"):
+        if p.get("slot") not in ("1", "2", "3", "4"):
             continue
         url = p["image_url"].strip().replace("http://", "https://", 1)   # https 페이지에서 http 이미지는 막혀요
         src = (p.get("source_url") or "").strip().replace("http://", "https://", 1)
