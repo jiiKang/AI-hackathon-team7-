@@ -20,6 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SIZE = {"대": "대형", "중": "중형", "소": "소형"}
 MIN_CONF = 0.5        # 추정 좌석수는 신뢰도가 이보다 낮으면 버림
+BELIEF_KEYS = ("outlet", "wifi", "laptop", "noise")   # 확률 점수로 추천에 쓰는 속성
 
 
 def read_text(path):
@@ -123,9 +124,17 @@ def to_cafe(i, row):
         lat, lng = float(row.get("lat")), float(row.get("lng"))
     except (TypeError, ValueError):
         lat = lng = None
+    # 추천 점수용: 속성값 + 확신도(0~1, 출처별 신뢰도). 없으면 '미확인'이라 키 자체를 안 넣어요.
+    belief = {k: {"v": a.v(k), "p": a.conf(k)} for k in BELIEF_KEYS if a.v(k)}
+    try:
+        rating = float(row.get("kakao_avg_rating"))
+    except (TypeError, ValueError):
+        rating = None
+    stats = {"reviews": int(row.get("review_total") or 0), "rating": rating, "rating_n": int(row.get("n_kakao") or 0)}
     return {"id": i, "src_id": row.get("id"), "name": (row.get("name") or "").strip(),
             "address": (row.get("address") or "").strip(), "lat": lat, "lng": lng,
             "hours": h, "seating": s, "menu": menu, "atmosphere": atmo,
+            "belief": belief, "stats": stats,
             "extra": {k: v for k, v in extra.items() if v}, "photos": []}
 
 
@@ -137,25 +146,44 @@ def attach_photos(cafes, photo_rows):
         c = by.get(p.get("cafe_id"))
         if not c or len(c["photos"]) >= 4:
             continue
-        if p.get("slot") not in ("1", "2", "3", "4"):
+        if str(p.get("slot")) not in ("1", "2", "3", "4"):    # CSV 는 문자열, REST(JSON)는 숫자
             continue
         url = p["image_url"].strip().replace("http://", "https://", 1)   # https 페이지에서 http 이미지는 막혀요
         src = (p.get("source_url") or "").strip().replace("http://", "https://", 1)
         c["photos"].append({"url": url, "source": src, "credit": ""})
 
 
+def fetch(table):
+    """--fetch: .env 의 SUPABASE_URL / SUPABASE_ANON_KEY(공개 키)로 테이블·뷰를 바로 읽어요 (파일 내보내기 불필요)."""
+    import os
+    import urllib.request
+    env = dict(l.strip().split("=", 1) for l in (ROOT / ".env").read_text(encoding="utf-8").splitlines() if "=" in l and not l.startswith("#"))
+    url, key = (os.environ.get("SUPABASE_URL") or env.get("SUPABASE_URL", "")).strip(), (os.environ.get("SUPABASE_ANON_KEY") or env.get("SUPABASE_ANON_KEY", "")).strip()
+    if not url or not key:
+        sys.exit(".env 에 SUPABASE_URL / SUPABASE_ANON_KEY 가 필요해요.")
+    with urllib.request.urlopen(urllib.request.Request(f"{url}/rest/v1/{table}?select=*", headers={"apikey": key}), timeout=30) as r:
+        return json.load(r)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("detail")
+    ap.add_argument("detail", nargs="?")
     ap.add_argument("photos", nargs="?")
+    ap.add_argument("--fetch", action="store_true", help="파일 대신 Supabase 에서 바로 읽기")
     ap.add_argument("-o", "--out", default=str(ROOT / "data" / "cafes.json"))
     a = ap.parse_args()
-    rows = [r for r in read_rows(a.detail) if (r.get("name") or "").strip()]
+    if not a.fetch and not a.detail:
+        ap.error("detail 파일을 주거나 --fetch 를 써 주세요")
+    rows = [r for r in (fetch("cafe_detail") if a.fetch else read_rows(a.detail)) if (r.get("name") or "").strip()]
     if not rows:
         sys.exit("읽은 카페가 0곳이에요.")
+    out = Path(a.out)
+    if out.exists():      # 앱 카페 번호(1,2,3…)가 바뀌지 않게 기존 순서를 유지하고 새 카페는 뒤에 붙여요
+        order = {c.get("src_id"): n for n, c in enumerate(json.loads(out.read_text(encoding="utf-8")))}
+        rows.sort(key=lambda r: order.get(r.get("id"), len(order)))
     cafes = [to_cafe(i, r) for i, r in enumerate(rows, 1)]
-    if a.photos:
-        attach_photos(cafes, read_rows(a.photos))
+    if a.fetch or a.photos:
+        attach_photos(cafes, fetch("cafe_photo") if a.fetch else read_rows(a.photos))
     out = Path(a.out)
     if out.exists():
         out.with_name(out.stem + ".backup.json").write_bytes(out.read_bytes())
