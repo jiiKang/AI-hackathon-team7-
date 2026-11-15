@@ -1,75 +1,9 @@
-# 안암 카페 챗 (MVP)
+# ㅇㄷ로 (MVP)
 
 문장으로 물어보면 → 후보 최대 5곳(영업시간·좌석·메뉴·분위기 키워드 포함) → 하나 고르면 지도에 핀으로 표시.
 Python 표준 라이브러리만 사용 (`pip install` 없음), 지도는 카카오맵 (JavaScript 키 필요).
 
-## 1. 실행
 
-```bat
-:: Windows (cmd)
-copy .env.example .env
-set CAFES_PATH=data/cafes.sample.json
-python server.py
-```
-```bash
-# 맥/리눅스
-cp .env.example .env
-CAFES_PATH=data/cafes.sample.json python3 server.py
-```
-→ http://127.0.0.1:8000  (Windows에서 `python`이 안 되면 `py server.py`)
-- 폰에서 보려면: `HOST=0.0.0.0 python3 server.py` 후 같은 와이파이에서 `http://<내 PC IP>:8000`
-- 인터넷이 필요해요: 카카오맵 SDK와 폰트를 불러와요. 시연 장소 와이파이를 미리 확인하세요.
-
-## 2. 해야 할 일 (★ 표시)
-
-| 할 일 | 위치 |
-|---|---|
-| ★ 카페 10곳 데이터 채우기 | `data/cafes.json` (지금은 빈 칸 10개) |
-| ★ 카카오 JavaScript 키 입력 (필수, 없으면 지도가 안 떠요) | `.env` 의 `KAKAO_JS_KEY` |
-| ★ 카카오 REST API 키 입력 (상호명 → 좌표 자동 조회, 공란이면 좌표를 직접 적어야 해요) | `.env` 의 `KAKAO_REST_KEY` |
-| ★ LLM API 키 입력 (비워도 동작: 키워드 매칭 모드) | `.env` 의 `GEMINI_API_KEY` |
-| ★ 무료로 쓸 수 있는 모델명 확인 | `.env` 의 `GEMINI_MODEL` (무료 한도·모델명은 바뀌어요) |
-| 안암역 좌표/지도 중심 | `public/app.js` 맨 위 `STATION` |
-
-데이터를 다 채우면 `CAFES_PATH` 없이 `python3 server.py` 만 실행하면 돼요.
-`cafes.json`은 수정하면 서버 재시작 없이 바로 반영돼요. 내용이 비어 있는 칸은 검색 대상에서 자동으로 빠져요.
-
-## 3. 팀 시트(TSV/CSV)로 채우기 — 변환기
-
-팀이 만든 75열 시트를 그대로 변환해요. (구글시트 → 파일 → 다운로드 → TSV 또는 CSV)
-```bat
-python tools/import_sheet.py 시트.tsv
-```
-- `data/cafes.json` 이 만들어져요. 기존 파일은 `cafes.backup.json` 으로 백업돼요.
-- 시트의 '예시' 행은 자동으로 건너뛰어요.
-- 같은 항목이 일반 열과 `(리뷰)` 열에 둘 다 있으면 값이 있는 쪽을 써요. 리뷰 열을 우선해요 (`PREFER_REVIEW` 로 바꿀 수 있어요).
-- 서버가 쓰지 않는 열(건축물대장 면적, 수집자 등)은 버려요. 가격·주차·예약·단점 등은 `extra` 로 들어가서 AI 추천 근거로만 쓰여요.
-- **좌표는 시트에 안 적어도 돼요.** `.env` 에 `KAKAO_REST_KEY=` (카카오 개발자 콘솔의 **REST API 키**, JavaScript 키와 다른 키)를 넣으면
-  서버가 상호명으로 카카오 로컬 API를 검색해서 좌표를 채우고, 결과는 `data/geocode_cache.json` 에 저장해요(다음부터는 조회 안 함).
-  - 안암역 반경 2km 안에서만 검색하고, 같은 이름이 여러 곳이면 시트의 주소와 맞는 지점을 골라요. 이름으로 못 찾으면 주소로 다시 찾아요.
-  - 엉뚱한 곳에 찍히면 시트에 `위도`,`경도` 열을 직접 적으세요. 그 값이 항상 우선이에요.
-  - 키가 없으면 좌표가 빈 카페는 목록에는 나와도 지도에 핀이 안 찍혀요.
-
-## 3-1. 데이터 칸 (카페 1곳, JSON 직접 작성할 때)
-
-```json
-{
-  "id": 1, "name": "카페 이름", "address": "서울 성북구 안암로 ...",
-  "lat": 37.58, "lng": 127.02,
-  "hours":      { "open": "09:00", "close": "23:00", "closed_days": ["일"], "note": "" },
-  "seating":    { "tables": [{"type": "4인 테이블", "count": 5}, {"type": "1인 바석", "count": 6}],
-                  "total_seats": 28, "size": "중형", "outlets": "많음", "outlet_note": "", "note": "" },
-  "menu":       { "desserts": ["티라미수", "스콘"], "drinks": ["아메리카노", "라떼"], "signature": ["대표 메뉴"] },
-  "atmosphere": { "noise": "조용", "tags": ["우드톤", "아늑함"], "note": "" },
-  "extra":      { "아메리카노 가격": "4,500원", "주차": "불가" }
-}
-```
-키워드 매칭 모드가 인식하는 값 (LLM 모드에서는 자유롭게 써도 돼요):
-- `size`: 소형 / 중형 / 대형
-- `outlets`: 많음 / 보통 / 적음 / 없음
-- `noise`: 조용 / 보통 / 활기 / 시끌 (`조용함`처럼 뒤에 글자가 붙어도 인식해요)
-- 자정 넘어 영업은 `close`에 `"02:00"` 또는 `"24:00"`처럼 적어요.
-- 좌표(`lat`,`lng`)는 카카오맵/구글맵에서 장소 우클릭으로 복사하면 돼요. 좌표가 비면 지도에 핀이 안 찍혀요.
 
 ## 4. 동작 방식 (LLM은 '번역기', 찾기는 코드가)
 
