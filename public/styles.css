@@ -324,10 +324,16 @@ button { color: inherit; }
 .dname .dtxt { min-width: 0; }
 .askbtn { flex: none; border: 0; border-radius: var(--r-pill); background: var(--blue); color: #fff; font-size: 13px; font-weight: 700; padding: 10px 14px; cursor: pointer; box-shadow: var(--shadow); white-space: nowrap; }
 .askbtn:active { background: var(--blue-dark); }
+.dbtns { display: flex; align-items: center; gap: 8px; flex: none; }
+.savebtn { display: inline-flex; align-items: center; gap: 5px; flex: none; border: 1.5px solid var(--blue); border-radius: var(--r-pill); background: #fff; color: var(--blue); font-size: 13px; font-weight: 700; padding: 8.5px 12px; cursor: pointer; white-space: nowrap; }
+.savebtn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.savebtn.on { background: var(--blue-soft); }
+.savebtn.on svg { fill: var(--blue); }
+.savebtn:active { background: var(--blue-soft); }
 .pagetitle .blue { color: var(--blue); }
 .rchips.wrap { flex-wrap: wrap; overflow: visible; padding: 4px 0 6px; }
 .rchips.wrap .rchip { max-width: 100%; white-space: normal; }
-.page .qa { margin-top: 14px; }
+.page .qa { margin-top: 14px; padding-bottom: 96px; }   /* 마지막 말풍선·'이 대화 지우기'가 아래 입력창에 가리지 않게 */
 
 /* 최근 대화 · 저장됨 */
 .newchat { border: 0; border-radius: var(--r-pill); background: var(--blue); color: #fff; font-size: 13px; font-weight: 700; padding: 8px 14px; cursor: pointer; }

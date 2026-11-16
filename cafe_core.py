@@ -1185,13 +1185,30 @@ def rule_answer(c, q):
     return "무엇이 궁금하세요? 영업시간, 좌석, 메뉴처럼 물어봐 주세요."
 
 
-def llm_answer(c, q):
+def _clean_history(v):
+    """앱이 보낸 이전 질문·답 (최대 4턴). 형식이 이상하면 버려요."""
+    out = []
+    if isinstance(v, list):
+        for t in v[-4:]:
+            if isinstance(t, dict):
+                hq, ha = str(t.get("q", "")).strip()[:200], str(t.get("a", "")).strip()[:200]
+                if hq and ha:
+                    out.append((hq, ha))
+    return out
+
+
+def llm_answer(c, q, hist=()):
     data = {"이름": c.get("name"), "주소": c.get("address"), "영업시간": c.get("hours"), "좌석": c.get("seating"),
             "메뉴": c.get("menu"), "분위기": c.get("atmosphere"), "부가정보": c.get("extra")}
+    ctx = ""
+    if hist:      # 같은 카페에서 앞서 나눈 대화 → 한 번의 대화처럼 이어서 답해요
+        ctx = ("[이전 대화] (맥락 파악용이에요. 사실 근거는 항상 [카페 데이터]만 써)\n"
+               + "\n".join(f"손님: {hq}\n도우미: {ha}" for hq, ha in hist) + "\n")
     prompt = ("너는 카페 안내 도우미야. 아래 [카페 데이터]에 있는 내용만 근거로 질문에 한국어로 1~2문장, 친근한 존댓말로 답해.\n"
+              "[이전 대화]가 있으면 이어서 답하고, '거기', '그럼', '그건'처럼 앞 대화를 가리키는 말은 그 맥락으로 이해해.\n"
               "데이터에 없으면 지어내지 말고 '데이터에서 확인되지 않았어요. 매장에 문의해 보세요'라고 답해. 현재 시각은 "
               f"{datetime.now(KST).strftime('%H:%M')}이야.\n[카페 데이터]\n{json.dumps(data, ensure_ascii=False)[:3500]}\n"
-              f"[질문]\n{q}\n\nJSON으로만 답해: {{\"answer\": \"...\"}}")
+              f"{ctx}[질문]\n{q}\n\nJSON으로만 답해: {{\"answer\": \"...\"}}")
     out = json.loads(call_llm(prompt))
     ans = str(out.get("answer", "")).strip()
     if not ans:
@@ -1200,7 +1217,7 @@ def llm_answer(c, q):
 
 
 def api_ask(raw, length, ip="local"):
-    if length > 4000:
+    if length > 12000:       # 이전 대화(최대 4턴)가 같이 와서 다른 API보다 넉넉해요
         return 413, {"error": "질문이 너무 길어요"}
     try:
         d = json.loads(raw or b"{}")
@@ -1216,10 +1233,11 @@ def api_ask(raw, length, ip="local"):
     if rate_limited(ip, "ask", 20):
         return 429, {"error": "요청이 너무 많아요. 잠시 후 다시 시도해주세요"}
     source = "rule"
+    hist = _clean_history(d.get("history"))
     try:
         if not GEMINI_API_KEY:
             raise RuntimeError("no key")
-        ans, source = llm_answer(cafe, q), "llm"
+        ans, source = llm_answer(cafe, q, hist), "llm"
     except Exception as e:
         if GEMINI_API_KEY:
             print("[ask] AI 실패 → 규칙 답변:", repr(e), file=sys.stderr)
@@ -1324,7 +1342,7 @@ class Handler(SimpleHTTPRequestHandler):
         if not route:
             return self._json({"error": "not found"}, 404)
         n = int(self.headers.get("Content-Length") or 0)
-        status, obj = route(self.rfile.read(min(n, 4001)), n, self.client_address[0])
+        status, obj = route(self.rfile.read(min(n, 12001)), n, self.client_address[0])
         return self._json(obj, status)
 
 

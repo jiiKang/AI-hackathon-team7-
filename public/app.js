@@ -93,19 +93,25 @@ const app = $("#app"), sheet = $("#sheet"), body = $("#body"), page = $("#page")
 
 /* ---------- 상태 ---------- */
 const S = { all: [], results: [], understood: [], notice: "", guide: "", suggest: [], votes: store.get("votes", {}), query: "", selected: null, token: 0, here: null, sort: null,   // sort: 결과가 실제로 어떤 정렬인지(서버가 알려줌). 주소 검색은 null
-  cur: { view: "home" }, stack: [], qa: {}, hist: store.get("hist", []) };
+  cur: { view: "home" }, stack: [], qa: store.get("qa", {}), hist: store.get("hist", []) };
 let map = null, overlays = [], hereOverlay = null;
 
 /* ---------- 회원 (Supabase Auth · Google 로그인) ----------
    키가 없으면(A.sb 없음) 로그인 기능은 숨기고 예전처럼 동작해요. 회원별 데이터는 RLS 로 본인 것만 읽고 써요:
    user_profile(로그인 시 자동 생성) · user_favorite(저장한 카페) · user_search_log(검색 기록) */
-const A = { sb: null, user: null, taste: null, tasteAsked: false };   // taste: { choices, skipped } (없으면 null)
+const A = { sb: null, user: null, favs: new Set(), taste: null, tasteAsked: false };   // favs: 저장한 카페의 src_id 모음, taste: { choices, skipped } (없으면 null)
 const welcome = $("#welcome");
 const cafeKey = c => c && c.src_id;                       // Supabase cafe.id (공공 매장 ID)
 const userName = () => (A.user && ((A.user.user_metadata && (A.user.user_metadata.full_name || A.user.user_metadata.name)) || A.user.email)) || "";
 const acctHtml = () => !A.sb ? "" : A.user
   ? `<div class="acct"><span><b>${esc(userName())}</b> 님</span><span><button class="link" data-taste>내 취향</button> <button class="link gray" data-logout>로그아웃</button></span></div>`
   : `<div class="acct"><span>로그인하지 않았어요</span><button class="link" data-login>로그인</button></div>`;
+async function loadFavs() {             // 로그인 계정에 저장한 카페 목록
+  A.favs = new Set();
+  if (!A.user) return;
+  const { data } = await A.sb.from("user_favorite").select("cafe_id");
+  (data || []).forEach(r => A.favs.add(r.cafe_id));
+}
 async function loadHist() {             // 로그인 계정에 저장된 이전 검색을 기록에 합침
   if (!A.user) return;
   const { data } = await A.sb.from("user_search_log").select("query,created_at").order("created_at", { ascending: false }).limit(30);
@@ -157,9 +163,20 @@ async function saveTaste(skipped) {
 async function setUser(u) {
   A.user = u || null;
   if (A.user) { if (!welcome.classList.contains("loading")) welcome.hidden = true; } else A.tasteAsked = false;   // 로딩 중이면 startDone 이 시간 맞춰 닫아요
-  await Promise.all([loadHist(), loadTaste()]);
+  await Promise.all([loadFavs(), loadHist(), loadTaste()]);
   if (A.user && !A.taste && !A.tasteAsked && S.cur.view === "home") { A.tasteAsked = true; return openTaste(true); }   // 가입 직후(저장된 취향 없음) 한 번만
-  if (["home", "history"].includes(S.cur.view)) draw();
+  if (["home", "history", "saved", "detail"].includes(S.cur.view)) draw();     // 저장 상태가 바뀌었을 수 있는 화면
+}
+async function toggleFav() {            // 카페 상세의 '저장' 버튼
+  const c = cafeById(S.selected), k = cafeKey(c);
+  if (!k) return;
+  if (!A.user) { welcome.hidden = false; return; }                 // 로그인이 필요해요
+  const on = A.favs.has(k);
+  const { error } = on ? await A.sb.from("user_favorite").delete().eq("cafe_id", k) : await A.sb.from("user_favorite").insert({ cafe_id: k });
+  if (error) return toast("저장하지 못했어요");
+  on ? A.favs.delete(k) : A.favs.add(k);
+  const b = $("[data-save]"); if (b) b.outerHTML = V.save(c);
+  toast(on ? "저장을 해제했어요" : "저장했어요");
 }
 async function googleLogin() {
   const { error } = await A.sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + location.pathname } });
@@ -171,9 +188,42 @@ function logSearch(q) {
 }
 
 /* ---------- 기록·취향 (이 기기에만 저장) ---------- */
-function pushHist(q, und) {
-  S.hist = [{ q, und: und || [], t: Date.now() }, ...S.hist.filter(h => h.q !== q)].slice(0, 30);
+function pushHist(q, und, snap) {
+  S.hist = [{ q, und: und || [], t: Date.now(), snap }, ...S.hist.filter(h => h.q !== q)].slice(0, 30);
   store.set("hist", S.hist);
+}
+function snapResults() {                // 결과 카드(카페 id·순위·이유)만 저장해 두면, 다시 열 때 서버·AI를 안 거치고 그대로 복원해요
+  return { r: S.results.map(x => ({ id: x.id, rank: x.rank, reason: x.reason, matched: x.matched })), notice: S.notice, guide: S.guide, suggest: S.suggest, sort: S.sort };
+}
+function resumeChat(i) {                // 최근 대화 하나를 다시 열기: 저장된 결과가 있으면 그대로, 없으면(다른 기기 기록 등) 다시 검색
+  const h = S.hist[i];
+  if (!h) return;
+  const res = h.snap && Array.isArray(h.snap.r) ? h.snap.r.map(x => { const c = S.all.find(a => a.id === x.id); return c && { ...c, rank: x.rank, reason: x.reason, matched: x.matched }; }).filter(Boolean) : [];
+  if (!res.length) return search(h.q);
+  ++S.token;
+  S.hist = [{ ...h, t: Date.now() }, ...S.hist.filter(x => x !== h)]; store.set("hist", S.hist);     // 다시 연 대화는 맨 위로
+  Object.assign(S, { query: h.q, selected: null, here: null, pick: null, noTaste: false, results: res, understood: h.und || [],
+    notice: h.snap.notice || "", guide: h.snap.guide || "", suggest: h.snap.suggest || [], sort: h.snap.sort || "recommend", stack: [{ view: "home" }] });
+  showResults(true);
+}
+function saveQA() {                     // 장소별 AI 대화를 이 기기에 저장 (답이 온 것만, 카페당 최근 20개·카페 20곳까지)
+  const keep = {};
+  Object.keys(S.qa).map(id => [id, S.qa[id].filter(x => x.a != null && !x.err).slice(-20)]).filter(([, l]) => l.length)
+    .sort((a, b) => b[1][b[1].length - 1].t - a[1][a[1].length - 1].t).slice(0, 20).forEach(([id, l]) => { keep[id] = l; });
+  store.set("qa", keep);
+}
+function qaChats() {                    // 최근 대화 화면에 보여줄 장소별 대화 (최근 질문 순)
+  return Object.keys(S.qa).map(id => ({ id: +id, c: cafeById(+id), l: S.qa[id] })).filter(x => x.c && x.l.length)
+    .sort((a, b) => b.l[b.l.length - 1].t - a.l[a.l.length - 1].t);
+}
+function scrollQA() {
+  const bs = document.querySelectorAll("#qa .bubble");
+  if (bs.length) bs[bs.length - 1].scrollIntoView({ block: "end" });
+}
+function openAsk(id) {                  // 최근 대화의 '장소에 물어본 대화'를 열어 이어서 묻기
+  if (!cafeById(id)) return;
+  S.selected = id; qEl.value = "";
+  go("ask", id); scrollQA();
 }
 function prefs() {                      // 자주 쓴 조건 순서
   const n = {};
@@ -217,11 +267,11 @@ function toast(msg) { toastEl.textContent = msg; toastEl.classList.add("on"); cl
 const V = {
   /* 홈 (지도 위 시트): 주소 검색 · 최근 대화 · 추천 카드 */
   home: () => {
-    const rec = S.hist.slice(0, 6).map(h => h.q), has = rec.length > 0;
+    const rec = S.hist.slice(0, 6), has = rec.length > 0;
     return `<div data-screen="home">
       <form class="addr-search" id="addrForm" role="search">${ico("search")}<input id="addr" type="search" enterkeyhint="search" placeholder="${esc(TEXT.addrPlaceholder)}" aria-label="주소 검색"></form>
       ${has ? `<div class="sec"><b>최근 대화</b><button class="link" data-history>전체보기</button></div>
-      <div class="rchips">${rec.map(q => `<button class="rchip" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div>` : ""}
+      <div class="rchips">${rec.map((h, i) => `<button class="rchip" data-hq="${i}">${esc(h.q)}</button>`).join("")}</div>` : ""}
       <div class="sec"><b>이런 건 어때요</b></div>
       <div class="rchips">${EXAMPLES.map(q => `<button class="rchip" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div>
       ${recSets().map(([t, l]) => `<div class="sec"><b>${esc(t)}</b></div><div class="swipe">${l.map(V.rcard).join("")}</div>`).join("")}
@@ -318,7 +368,7 @@ const V = {
     const nav = c.lat != null ? `https://map.kakao.com/link/to/${q},${c.lat},${c.lng}` : `https://map.kakao.com/link/search/${q}`;
     return `<div class="page detail" data-screen="detail">
       <div class="toprow"><button class="back" data-back>${S.results.length ? "← 후보 목록" : "← 뒤로"}</button><button class="link" data-showmap>지도에서 보기</button></div>
-      <div class="dname"><div class="dtxt"><h2>${esc(c.name)} ${V.badge(c)}</h2>${c.address ? `<p class="addr">${esc(c.address)}</p>` : ""}</div><button type="button" class="askbtn" data-ask>AI에게 묻기</button></div>
+      <div class="dname"><div class="dtxt"><h2>${esc(c.name)} ${V.badge(c)}</h2>${c.address ? `<p class="addr">${esc(c.address)}</p>` : ""}</div><div class="dbtns">${A.sb ? V.save(c) : ""}<button type="button" class="askbtn" data-ask>AI에게 묻기</button></div></div>
       <div class="info">
         ${n.mood ? `<p class="summary">${esc(n.mood.length > 110 ? n.mood.slice(0, 108) + "…" : n.mood)}</p>` : ""}
         <div class="rows">${row("cup", "구분", c.franchise ? "프랜차이즈" : "개인 카페")}${row("clock", "시간", s.hours)}${row("seat", "좌석", s.seating)}${row("cup", "메뉴", s.menu)}${row("mood", "분위기", s.atmosphere)}</div>
@@ -343,16 +393,16 @@ const V = {
   },
   qa: id => {
     const l = S.qa[id] || [];
-    return l.length ? `<h3>이 카페에 물어본 내용</h3>` + l.map(x => `<div class="bubble q">${esc(x.q)}</div><div class="bubble a${x.a == null ? " wait" : ""}">${x.a == null ? "찾는 중…" : esc(x.a)}</div>`).join("") : "";
+    return l.length ? `<h3>이 카페에 물어본 내용</h3>` + l.map(x => `<div class="bubble q">${esc(x.q)}</div><div class="bubble a${x.a == null ? " wait" : ""}">${x.a == null ? "찾는 중…" : esc(x.a)}</div>`).join("") + `<button class="link gray clr" data-qaclear>이 대화 지우기</button>` : "";
   },
 
   /* 장소에 대해 AI에게 묻기: 이 카페 정보만 가지고 답해요 (아래 표지판으로 질문) */
   ask: id => {
     const c = cafeById(id); if (!c) return V.error("카페를 찾을 수 없어요");
     return `<div class="page" data-screen="ask">
-      <div class="toprow"><button class="back" data-back>← ${esc(c.name)}</button></div>
+      <div class="toprow"><button class="back" data-back>← ${(S.stack[S.stack.length - 1] || {}).view === "history" ? "최근 대화" : esc(c.name)}</button></div>
       <h2 class="pagetitle">${esc(c.name)}<br><span class="blue">에 대해 물어보세요</span></h2>
-      <p class="lead">이 카페의 정리된 정보만 보고 답해요. 없는 내용은 '확인되지 않았어요'라고 답해요.</p>
+      <p class="lead">이 카페의 정리된 정보만 보고 답해요. 없는 내용은 '확인되지 않았어요'라고 답해요. 앞에서 물어본 내용은 기억하고 이어서 답해요.</p>
       <div class="rchips wrap">${ASK_PRESETS.map(q => `<button class="rchip" data-askq="${esc(q)}">${esc(q)}</button>`).join("")}</div>
       <div class="qa" id="qa">${V.qa(c.id)}</div>
     </div>`;
@@ -434,19 +484,29 @@ const V = {
     </div>`;
   },
 
-  /* 저장됨: MVP 에서는 준비 중 */
-  saved: () => `<div class="page" data-screen="saved">
-    <div class="toprow"><h2 class="pagetitle">저장됨</h2></div>
-    <div class="soon">${ico("bookmark")}<b>준비 중이에요</b><p>마음에 든 카페를 모아 보는 기능을 만들고 있어요.</p></div>
-  </div>`,
+  /* 저장 버튼 (카페 상세, 'AI에게 묻기' 옆): 저장하면 파란색으로 채워져요 */
+  save: c => { const on = A.favs.has(cafeKey(c));
+    return `<button type="button" class="savebtn${on ? " on" : ""}" data-save aria-pressed="${on}">${ico("bookmark", "")}<span>${on ? "저장됨" : "저장"}</span></button>`; },
+
+  /* 저장됨: 내가 저장한 카페 (로그인 필요) */
+  saved: () => {
+    const list = S.all.filter(c => A.favs.has(cafeKey(c)));
+    return `<div class="page" data-screen="saved">
+      <div class="toprow"><h2 class="pagetitle">저장됨</h2></div>
+      ${!A.sb ? `<div class="soon">${ico("bookmark")}<b>로그인 기능을 쓸 수 없어요</b></div>`
+        : !A.user ? `<div class="soon">${ico("bookmark")}<b>로그인하면 저장할 수 있어요</b><p>마음에 든 카페를 모아 볼 수 있어요.</p><button class="go blue" data-login>Google로 로그인</button></div>`
+        : list.length ? `<ol class="cards">${list.map(V.card).join("")}</ol>`
+        : `<div class="soon">${ico("bookmark")}<b>아직 저장한 카페가 없어요</b><p>카페 상세에서 '저장'을 눌러 보세요.</p></div>`}
+    </div>`;
+  },
 
   /* 최근 대화 전체보기 */
-  history: () => `<div class="page" data-screen="history">
+  history: () => { const chats = qaChats(); return `<div class="page" data-screen="history">
     <div class="toprow"><h2 class="pagetitle">최근 대화</h2><button class="newchat" data-newchat>＋ 새 대화</button></div>
     ${acctHtml()}
-    ${S.hist.length ? `<ul class="hist">${S.hist.map(h => `<li><button data-q="${esc(h.q)}">${esc(h.q)}<small>${ago(h.t)}${h.und && h.und.length ? " · " + h.und.map(esc).join(" · ") : ""}</small></button></li>`).join("")}</ul><button class="link gray clr" data-clear>기록 지우기</button>`
+    ${S.hist.length || chats.length ? `${S.hist.length ? `<ul class="hist">${S.hist.map((h, i) => `<li><button data-hq="${i}">${esc(h.q)}<small>${ago(h.t)}${h.und && h.und.length ? " · " + h.und.map(esc).join(" · ") : ""}${h.snap ? " · 이어서 보기" : ""}</small></button></li>`).join("")}</ul>` : ""}${chats.length ? `<div class="sec"><b>장소에 물어본 대화</b></div><ul class="hist">${chats.map(x => { const last = x.l[x.l.length - 1]; return `<li><button data-aid="${x.id}">${esc(x.c.name)}<small>${ago(last.t)} · 질문 ${x.l.length}개 · ${esc(last.q)}</small></button></li>`; }).join("")}</ul>` : ""}<button class="link gray clr" data-clear>기록 지우기</button>`
       : '<p class="lead">아직 대화 기록이 없어요. 오른쪽 위 \'새 대화\'를 눌러 물어보세요.</p>'}
-  </div>`,
+  </div>`; },
 };
 const MODE = { home: "home", loading: "map", results: "map", error: "map", peek: "map", chat: "page", detail: "page", ask: "page", history: "page", saved: "page", swipe: "page",
   feedback: "plain", "feedback-done": "plain", sources: "plain", taste: "plain" };
@@ -730,7 +790,7 @@ async function search(q, pick = null, noTaste = false) {      // pick: 이용자
     if (!r.ok) throw new Error(j.error || `오류 (${r.status})`);
     S.results = j.results || []; S.understood = j.understood || []; S.notice = j.notice || ""; S.guide = j.guide || ""; S.suggest = j.suggest || []; S.sort = j.sort || "recommend";
     if (!S.results.length) { drawMarkers(); S.cur = { view: "error", arg: S.guide || S.notice || "조건에 맞는 카페를 찾지 못했어요. 다르게 물어봐 주세요." }; draw(); return; }
-    if (!pick && !noTaste) { pushHist(q, S.understood); logSearch(q); }   // 정렬·취향만 바꾼 재검색은 기록에 또 남기지 않아요
+    if (!pick && !noTaste) { pushHist(q, S.understood, snapResults()); logSearch(q); }   // 정렬·취향만 바꾼 재검색은 기록에 또 남기지 않아요
     showResults(true);
   } catch (e) {
     if (my !== S.token) return;
@@ -780,20 +840,21 @@ async function searchAddress(text) {    // 홈 아래 검색창: 주소로 찾�
 }
 
 async function ask(q) {                 // 카페 상세에서 이어서 질문
-  const id = S.selected, list = (S.qa[id] = S.qa[id] || []), item = { q, a: null };
+  const id = S.selected, list = (S.qa[id] = S.qa[id] || []), item = { q, a: null, t: Date.now() };
+  const prev = list.filter(x => x.a != null && !x.err).slice(-4).map(x => ({ q: x.q.slice(0, 200), a: String(x.a).slice(0, 200) }));   // 앞 대화를 같이 보내 한 대화처럼 이어가요
   list.push(item); qEl.value = ""; setPh(); renderQA();
   try {
-    const r = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cafe_id: id, question: q }) });
+    const r = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cafe_id: id, question: q, history: prev }) });
     const j = await r.json().catch(() => ({}));
-    item.a = r.ok ? j.answer : (j.error || `오류 (${r.status})`);
-  } catch (e) { item.a = "답을 가져오지 못했어요. 잠시 후 다시 물어봐 주세요."; }
-  renderQA();
+    if (r.ok) item.a = j.answer; else { item.a = j.error || `오류 (${r.status})`; item.err = true; }
+  } catch (e) { item.a = "답을 가져오지 못했어요. 잠시 후 다시 물어봐 주세요."; item.err = true; }
+  saveQA(); renderQA();
 }
 function renderQA() {
   const el = $("#qa");
   if (!el || S.cur.view !== "ask") return;
   el.innerHTML = V.qa(S.selected);
-  const last = el.lastElementChild; if (last) last.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  const bs = el.querySelectorAll(".bubble"), last = bs[bs.length - 1]; if (last) last.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
 const FB = { field: "", value: "", url: "", err: "" };
@@ -887,6 +948,11 @@ document.addEventListener("click", e => {
   if (t.closest("[data-vclose]")) { vmEl.hidden = true; return; }
   const open = t.closest("[data-open]");
   if (open) return openDetail(+open.dataset.open);
+  const hq = t.closest("[data-hq]");
+  if (hq) return resumeChat(+hq.dataset.hq);
+  const ac = t.closest("[data-aid]");
+  if (ac) return openAsk(+ac.dataset.aid);
+  if (t.closest("[data-qaclear]")) { delete S.qa[S.selected]; saveQA(); return renderQA(); }
   const q = t.closest("[data-q]");
   if (q) return search(q.dataset.q);
   const tip = t.closest("[data-tip]");
@@ -908,7 +974,7 @@ document.addEventListener("click", e => {
   if (t.closest("[data-showmap]")) return showOnMap();
   if (t.closest("[data-history]")) return go("history");
   if (t.closest("[data-clear]")) {
-    S.hist = []; store.set("hist", []);
+    S.hist = []; store.set("hist", []); S.qa = {}; store.set("qa", {});
     if (A.user) A.sb.from("user_search_log").delete().eq("user_id", A.user.id).then(() => {});
     return draw();
   }
@@ -920,7 +986,8 @@ document.addEventListener("click", e => {
   const nv = t.closest("[data-nav]");
   if (nv) return navTo(nv.dataset.nav);
   if (t.closest("[data-newchat]")) return newChat();
-  if (t.closest("[data-ask]")) { go("ask", S.selected); return qEl.focus(); }
+  if (t.closest("[data-save]")) return toggleFav();
+  if (t.closest("[data-ask]")) { go("ask", S.selected); scrollQA(); return qEl.focus(); }
   const aq = t.closest("[data-askq]");
   if (aq) return ask(aq.dataset.askq);
   const sw = t.closest("[data-sw]");
