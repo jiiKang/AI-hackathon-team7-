@@ -263,6 +263,15 @@ STOPWORDS = {"카페", "안암", "안암동", "추천", "알려줘", "있는", "
              "높은", "많은", "순으로", "가까운", "별점", "평점", "리뷰", "후기", "인기", "유명", "거리"}   # 정렬 선호 단어는 메뉴·분위기 매칭에서 제외
 KST = timezone(timedelta(hours=9))
 
+
+def now_kst():   # 시연 영상용: 환경변수 FAKE_NOW="13:00" 이면 오늘 날짜의 그 시각으로 고정해요 (없으면 실제 시각)
+    n, f = datetime.now(KST), os.environ.get("FAKE_NOW", "").strip()
+    try:
+        h, m = f.split(":")
+        return n.replace(hour=int(h), minute=int(m), second=0, microsecond=0) if f else n
+    except ValueError:
+        return n
+
 # ------------------------------------------------------- 확률 점수 (사전값 + 증거 → 확신도)
 # 거리 기준 위치: 현재 행정구역(안암동)의 중심인 안암역(6호선). 앱이 위치를 보내면 그걸 쓰고, 없으면 이걸 써요.
 HERE = (37.5861, 127.0292)     # (위도, 경도)
@@ -406,7 +415,7 @@ def is_open_now(h, now=None):
     o, cl = _hour(h.get("open")), _hour(h.get("close"))
     if o is None or cl is None:
         return None
-    now = now or datetime.now(KST)
+    now = now or now_kst()
     if "월화수목금토일"[now.weekday()] in _list(h.get("closed_days")):
         return False
     tm = now.hour + now.minute / 60
@@ -550,7 +559,7 @@ def _score_all(f, cafes):
     """조건 f 로 카페마다 점수를 매겨요. → [{q: 점수, opt: 낙관 점수, id, c: 카페, why, unknown, levels: {항목: 확신도}, t: 취향 점수}]
     levels 는 점수 비중이 큰(3점) 확률 속성만 담아요: 이게 추천순에서 '확실한 곳'을 가르는 기준이에요."""
     words = [w.lower() for w in (f.get("words") or []) + (f.get("_match") or []) if len(w) >= 2]
-    now = datetime.now(KST)
+    now = now_kst()
     scored = []
     for c in cafes:
         h, s = c.get("hours") or {}, c.get("seating") or {}
@@ -740,7 +749,7 @@ def clean_flags(d):
 
 def llm_parse(query):
     """LLM은 '번역기' 역할만: 질문 → 검색 조건. 카페 데이터는 보내지 않아서 짧고 빠름."""
-    now = datetime.now(KST)
+    now = now_kst()
     prompt = (
         "너는 카페 검색 질문을 '검색 조건'으로 바꾸는 번역기야. 설명 없이 JSON 객체 하나만 출력해.\n"
         "각 조건은 질문에 근거가 있을 때만 true, 아니면 null.\n"
@@ -982,7 +991,7 @@ def rule_explains(query):
 def search(query, here=None, sort=None, taste=None):
     """sort: 이용자가 고른 정렬. 'distance'(거리순) / 'recommend'(추천순). None 이면 질문에서 읽은 선호를 따라요.
     taste: 로그인 회원이 가입 때 고른 취향 {섹션: [항목 id]} (LLM 이 순위를 정하는 rank 모드에서는 쓰지 않아요)."""
-    now = datetime.now(KST)
+    now = now_kst()
     allc = [c for c in load_cafes() if has_info(c)]
     if not allc:
         return {"results": [], "source": "keyword",
@@ -1204,7 +1213,7 @@ def llm_answer(c, q, hist=()):
     prompt = ("너는 카페 안내 도우미야. 아래 [카페 데이터]에 있는 내용만 근거로 질문에 한국어로 1~2문장, 친근한 존댓말로 답해.\n"
               "[이전 대화]가 있으면 이어서 답하고, '거기', '그럼', '그건'처럼 앞 대화를 가리키는 말은 그 맥락으로 이해해.\n"
               "데이터에 없으면 지어내지 말고 '데이터에서 확인되지 않았어요. 매장에 문의해 보세요'라고 답해. 현재 시각은 "
-              f"{datetime.now(KST).strftime('%H:%M')}이야.\n[카페 데이터]\n{json.dumps(data, ensure_ascii=False)[:3500]}\n"
+              f"{now_kst().strftime('%H:%M')}이야.\n[카페 데이터]\n{json.dumps(data, ensure_ascii=False)[:3500]}\n"
               f"{ctx}[질문]\n{q}\n\nJSON으로만 답해: {{\"answer\": \"...\"}}")
     out = json.loads(call_llm(prompt))
     ans = str(out.get("answer", "")).strip()
