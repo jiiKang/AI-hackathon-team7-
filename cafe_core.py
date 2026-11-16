@@ -541,7 +541,7 @@ def _price(c):
 
 
 RELIABLE = .6      # 확신도가 이 이상이면 '확인된 정보', 미만이면 '추정', 0이면 '정보 없음'
-MAX_UNSURE = 1     # 거리순 한 화면에 맨 아래 붙여 보여줄 '정보 부족' 카페 수 상한
+MAX_UNSURE = 2     # 거리순 한 화면에 섞어 보여줄 '정보 부족' 카페 수 상한
 OPT_P = .8         # 거리순에서 '정보 없는' 속성을 이 확률로 가정해 후보를 넓혀요
 TASTE_W = .2       # 회원 취향은 질문으로 정해진 후보 '안에서' 순서만 가르는 보조 (별점·리뷰 점수에 더하는 비중)
 
@@ -691,11 +691,12 @@ def rank_by_flags(f, cafes, here=None, tf=None):
         sort, lambda r: (-(_rating(r["c"]) + 0.5 * math.log10(1 + _reviews(r["c"])) + TASTE_W * r["t"]), r["id"]))   # 선호가 없으면 별점+리뷰 수(+취향)를 섞은 기본값
     in_band = {r["id"] for r in band}
     ordered = sorted(band, key=key) + [r for r in rows if r["id"] not in in_band]
-    if far:     # 거리순: 점수 상위 DIST_POOL곳의 '확인됨'을 가까운 순으로 채우고, '정보 부족'은 MAX_UNSURE곳까지만 맨 아래에 붙여요 (확인된 곳이 모자라면 정보 부족으로 채움)
+    if far:     # 거리순: 점수 상위 DIST_POOL곳의 '확인됨'으로 채우고, '정보 부족'은 MAX_UNSURE곳까지만 넣어요 (확인된 곳이 모자라면 정보 부족으로 채움). 고른 5곳은 가까운 순
         unsure = lambda r: any(v < RELIABLE for v in r["levels"].values())
         sure = sorted([r for r in rows if not unsure(r)][:DIST_POOL], key=key)
         unk = sorted([r for r in rows if unsure(r)][:DIST_POOL], key=key)
         ordered = sure[:MAX_RESULTS - MAX_UNSURE] + unk[:MAX_UNSURE] + sure[MAX_RESULTS - MAX_UNSURE:] + unk[MAX_UNSURE:]
+        ordered = sorted(ordered[:MAX_RESULTS], key=key) + ordered[MAX_RESULTS:]       # 뽑은 5곳은 정보 부족도 섞어서 가까운 순으로
     if any(r["why"] or r["unknown"] for r in ordered):       # 요청과 맞는 정보가 하나도 없는 카페는 빼요 (맞는 곳이 있을 때만)
         ordered = [r for r in ordered if r["why"] or r["unknown"]]
     out = []
