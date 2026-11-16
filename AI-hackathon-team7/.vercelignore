@@ -1,7 +1,0 @@
-.env
-server.py
-tools
-__pycache__
-*.pyc
-data/cafes.backup.json
-*.zip

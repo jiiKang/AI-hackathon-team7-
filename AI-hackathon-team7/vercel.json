@@ -1,8 +1,0 @@
-{
-  "functions": {
-    "api/*.py": {
-      "maxDuration": 60,
-      "includeFiles": "{cafe_core.py,data/**}"
-    }
-  }
-}
