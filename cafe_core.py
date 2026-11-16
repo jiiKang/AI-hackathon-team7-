@@ -1288,7 +1288,7 @@ def api_feedback(raw, length, ip="local"):
         if rate_limited(ip, "feedback", 20):
             return 429, {"error": "요청이 너무 많아요. 잠시 후 다시 시도해주세요"}
         reasons = [r for r in (d.get("reasons") if isinstance(d.get("reasons"), list) else []) if r in FEEDBACK_FIELDS][:7]
-        text = str(d.get("text", "")).strip()[:300] if "etc" in reasons else ""
+        text = str(d.get("text", "")).strip()[:300]
         rec = {"ts": datetime.now(KST).isoformat(timespec="seconds"), "type": "vote", "vote": d["vote"], "cafe_id": cafe["id"], "cafe_name": cafe.get("name", ""),
                "reasons": reasons, "reason_labels": [FEEDBACK_FIELDS[r] for r in reasons], "text": text, "query": str(d.get("query", "")).strip()[:100]}
         return 200, {"ok": True, "stored": store_feedback(rec)}

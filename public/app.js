@@ -909,7 +909,7 @@ function postVote(id, vote, reasons = [], text = "") {
 async function saveVoteReports(id, reasons, text) {
   const k = cafeKey(cafeById(id));
   if (!A.user || !k || !reasons.length) return;
-  const rows = reasons.map(f => ({ cafe_id: k, field: f, reported_value: (f === "etc" && text) ? text : "(내용 없음)", note: null, user_id: A.user.id }));
+  const rows = reasons.map(f => ({ cafe_id: k, field: f, reported_value: text || "(내용 없음)", note: null, user_id: A.user.id }));
   const { error } = await A.sb.from("attr_report").upsert(rows, { onConflict: "cafe_id,field,user_id" });
   if (error) console.warn("제보 DB 저장 실패:", error.message);
 }
@@ -929,7 +929,7 @@ function drawVM() {
   vmEl.innerHTML = `<div class="vm-back" data-vclose></div><div class="vm" role="dialog" aria-label="무엇이 달랐나요?">
     <b class="vm-t">무엇이 달랐나요?</b><p>${esc(c.name)} · 해당하는 걸 모두 골라 주세요</p>
     <div class="vm-chips">${FIELDS.map(f => `<button type="button" data-vreason="${f.key}" class="${VM.reasons.includes(f.key) ? "on" : ""}">${f.label}</button>`).join("")}</div>
-    ${VM.reasons.includes("etc") ? `<textarea id="vmText" maxlength="300" placeholder="기타 의견을 자유롭게 적어 주세요">${esc(VM.text)}</textarea>` : ""}
+    <textarea id="vmText" maxlength="300" placeholder="${VM.reasons.includes("etc") ? "기타 의견을 자유롭게 적어 주세요" : "다른 점을 적어 주시면 돼요 (선택)"}">${esc(VM.text)}</textarea>
     <button class="go blue" data-vsend>보내기</button><button class="link gray" data-vclose>닫기</button>
     <p>이 의견은 추천을 더 좋게 만드는 데만 쓰여요. 다음 검색에서 이 카페를 빼지는 않아요.</p></div>`;
   if (VM.reasons.includes("etc") && !keep) setTimeout(() => { const t = vmEl.querySelector("#vmText"); if (t) t.focus(); }, 50);
