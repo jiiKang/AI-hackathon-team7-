@@ -280,7 +280,6 @@ const V = {
         ${chips.length ? `<div class="kw">${chips.map(k => `<span>${esc(k)}</span>`).join("")}</div>` : ""}
       </div>
       ${ph ? `<div class="thumb"><img src="${esc(safeUrl(ph.url))}" alt="" loading="lazy" referrerpolicy="no-referrer"></div>` : ""}
-      ${V.vote(c)}
     </li>`;
   },
   vote: c => `<div class="vote">
@@ -327,10 +326,9 @@ const V = {
         ${c.basis ? `<div class="basis">근거: ${esc(c.basis)}</div>` : ""}
       </div>
       ${V.photos(c)}
-      <div class="votebar"><span>이 카페 추천, 어땠나요?</span>${V.vote(c)}</div>
+      <div class="votebar"><span>카페 정보가 정확한가요?</span>${V.vote(c)}</div>
       <div class="actions">
         <a class="go blue" href="${esc(nav)}" target="_blank" rel="noopener">카카오맵에서 길찾기</a>
-        <button class="btn2" data-feedback>정보가 달라요</button>
       </div>
       <div class="foot"><span>${esc(TEXT.footLine)}</span><button type="button" data-sources>${esc(TEXT.footMore)}</button></div>
     </div>`;
@@ -472,7 +470,6 @@ function draw() {
   page.hidden = !inPage;
   const html = V[view](arg);
   if (inPage) { pbody.innerHTML = html; pbody.scrollTop = 0; } else { body.innerHTML = html; body.scrollTop = 0; sheet.dataset.view = view; }
-  qEl.readOnly = view === "home";
   setPh();
   setH(curH, false);                   // 메뉴가 나타나거나 사라지면 시트·버튼 높이를 다시 맞춰요
   ensureSentinel();
@@ -841,6 +838,13 @@ function postVote(id, vote, reasons = [], text = "") {
   return fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ cafe_id: id, vote, reasons, text, query: S.query || "" }) }).then(r => r.ok).catch(() => false);
 }
+async function saveVoteReports(id, reasons, text) {
+  const k = cafeKey(cafeById(id));
+  if (!A.user || !k || !reasons.length) return;
+  const rows = reasons.map(f => ({ cafe_id: k, field: f, reported_value: (f === "etc" && text) ? text : "(내용 없음)", note: null, user_id: A.user.id }));
+  const { error } = await A.sb.from("attr_report").upsert(rows, { onConflict: "cafe_id,field,user_id" });
+  if (error) console.warn("제보 DB 저장 실패:", error.message);
+}
 function onVote(id, kind) {
   if (kind === "up") {
     if (S.votes[id] === "up") delete S.votes[id];
@@ -866,6 +870,7 @@ async function sendDown() {
   const t = vmEl.querySelector("#vmText"), text = t ? t.value.trim() : "", id = VM.id;
   vmEl.hidden = true;
   S.votes[id] = "down"; store.set("votes", S.votes); refreshVotes();
+  saveVoteReports(id, VM.reasons, text);                 // 로그인했으면 내 계정 DB(attr_report)에도 남겨요
   const ok = await postVote(id, "down", VM.reasons, text);
   toast(ok ? "알려 주셔서 고마워요" : "의견을 보내지 못했어요. 잠시 후 다시 시도해 주세요");
 }
@@ -935,6 +940,8 @@ sign.addEventListener("submit", e => {
   search(v);
 });
 qEl.addEventListener("input", () => sign.classList.toggle("has-value", !!qEl.value));
+/* 홈에서 입력창을 누르면 바로 대화 화면으로. 입력창은 항상 입력 가능한 상태라서(읽기전용이 아님) 모바일에서 누르는 순간 키보드가 같이 올라와요 */
+qEl.addEventListener("focus", () => { if (S.cur.view === "home") openChat(); });
 
 /* 사진 로드 실패 → 그 사진만 숨김/대체 (캡처 단계에서 이미지 error 를 잡아요) */
 document.addEventListener("error", e => {

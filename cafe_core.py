@@ -45,7 +45,7 @@ load_env()
 # ============================ ★ 채워야 하는 설정 ============================
 # .env 파일에 적으세요 (.env.example 참고). 비워 두면 '키워드 매칭 모드'로 동작해요.
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()      # ★ LLM API 키 (공란 OK)
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")  # ★ 현재 무료로 쓸 수 있는 모델명 확인 후 교체
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")  # ★ 현재 무료로 쓸 수 있는 모델명 확인 후 교체
 KAKAO_JS_KEY = os.environ.get("KAKAO_JS_KEY", "").strip()                # ★ 카카오 JavaScript 키 (지도 표시에 필수)
 KAKAO_REST_KEY = os.environ.get("KAKAO_REST_KEY", "").strip()            # ★ 카카오 REST API 키 (상호명→좌표 자동 조회용, 공란 OK)
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip()                # ★ 구글 로그인·회원별 DB용 (공란이면 로그인 없이 '둘러보기'만)
@@ -778,18 +778,20 @@ def llm_parse(query):
 # ------------------------------------------------------- 2) LLM 랭킹
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 # 모델 자동 선택 우선순위 (내 키로 쓸 수 있는 것 중 앞에서부터). 무료 한도·모델명은 자주 바뀌어서 404면 자동으로 찾아 써요.
-MODEL_PREFERENCE = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite",
+MODEL_PREFERENCE = ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.5-flash",
                     "gemini-3-flash-preview", "gemini-2.5-flash-lite", "gemini-2.5-flash"]
 _model = {"name": GEMINI_MODEL, "switched": False}
 LLM_MODE = os.environ.get("LLM_MODE", "translate").strip()   # translate: LLM은 질문을 조건으로 번역만(빠름, 기본) / rank: LLM이 카페 데이터 전체를 보고 순위 결정(느림)
-_cfg = {"think": True}     # 최신 모델은 '생각' 때문에 느려서 thinkingLevel=low 로 요청 (모델이 거부하면 자동으로 끔)
-LLM_TIMEOUT = 30           # 초
+THINK_LEVELS = ["minimal", "low", None]   # 번역만 하면 되니 '생각'을 최소로. 모델이 거부(400)하면 한 단계씩 낮춰요 (마지막은 설정 없이)
+_cfg = {"think": 0}
+LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "12"))   # 초. 이 시간 안에 못 받으면 키워드 매칭으로 바로 대체해요
 
 
 def _gemini(prompt, model):
-    gen = {"temperature": 0.2, "responseMimeType": "application/json"}
-    if _cfg["think"]:
-        gen["thinkingConfig"] = {"thinkingLevel": "low"}
+    gen = {"temperature": 0, "responseMimeType": "application/json", "maxOutputTokens": 300}    # 조건 JSON 한 줄이면 충분해서 출력을 짧게 제한
+    lvl = THINK_LEVELS[_cfg["think"]]
+    if lvl:
+        gen["thinkingConfig"] = {"thinkingLevel": lvl}
     body = json.dumps({"contents": [{"parts": [{"text": prompt}]}], "generationConfig": gen}).encode()
     req = urllib.request.Request(f"{GEMINI_BASE}/models/{model}:generateContent", data=body, headers={
         "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY})
@@ -820,13 +822,13 @@ def pick_model():
 
 def call_llm(prompt):
     """★ 다른 LLM으로 바꾸려면 이 함수만 교체하세요. (문자열 prompt -> JSON 문자열)"""
-    for _ in range(3):
+    for _ in range(4):
         try:
             return _gemini(prompt, _model["name"])
         except urllib.error.HTTPError as e:
-            if e.code == 400 and _cfg["think"]:       # 이 모델이 thinkingLevel 설정을 모르면 빼고 다시
-                print("[LLM] 400 → thinking 설정 없이 다시 시도", file=sys.stderr)
-                _cfg["think"] = False
+            if e.code == 400 and _cfg["think"] < len(THINK_LEVELS) - 1:   # 이 모델이 그 thinkingLevel 을 모르면 한 단계 낮춰서 다시
+                _cfg["think"] += 1
+                print(f"[LLM] 400 → thinking 설정 {THINK_LEVELS[_cfg['think']]} 로 다시 시도", file=sys.stderr)
                 continue
             if e.code == 404 and not _model["switched"]:   # 모델 이름이 없거나 이 키로는 못 씀 → 쓸 수 있는 모델로 전환
                 new = pick_model()
@@ -960,6 +962,26 @@ def build_guide(query, flags, understood, results, cafes):
     return f"{line1}\n{line2}\n메뉴는 바뀔 수 있으니 가기 전에 카페에 확인해 보세요."
 
 
+# ------------------------------------------------------- 빠른 길: 규칙만으로 질문이 다 설명되면 LLM 을 건너뛰어요 (응답 즉시)
+RULE_TRIGGERS = ('1인', '24시', 'wifi', '가까', '가깝', '감성', '개인 운영', '개인 카페', '개인운영', '개인카페', '거리', '고요', '공부', '과제', '넓', '노트북', '늦게', '단체', '대형', '독립 카페', '동네 카페', '동네카페', '디저트', '디카페인', '떠들', '레포트', '리뷰', '리포트', '마카롱', '모닝', '모임', '무드', '밤', '베이커리', '별점', '분위기 맛집', '분위기 예쁜', '분위기 이쁜', '분위기 있', '분위기 좋', '분위기있', '분위기좋', '붐비지', '브런치', '빵', '사람 없', '사람없', '새벽', '수다', '스콘', '스터디', '시끌', '심야', '아침', '야간', '여럿', '영업 중', '영업중', '와이 파이', '와이파이', '와파', '유명', '인기', '일찍', '작업', '조용', '지금', '집중', '차분', '체인', '친구들', '카공', '케이크', '코딩', '콘센트', '쿠키', '팀플', '평가 좋', '평점', '프랜차이즈', '프차', '한적', '현재', '혼공', '혼밥', '혼자', '활기', '후기')
+_FILLER = {"카페", "카페에서", "카페를", "카페가", "카페는", "곳", "곳이", "말고", "아닌", "빼고", "제외", "없는", "아니", "같은", "하는", "되는", "있고", "많고", "좋고", "중인", "으로", "에서", "정도", "위주", "쪽에", "하기", "까지", "추천해줘", "추천해", "추천해주세요", "알려주세요", "찾아줘요", "좋은데", "있나요", "있어요", "있을까", "있을까요", "싶은데", "갈만한", "가볼만한"}
+_JOSA = re.compile(r"(이|가|을|를|은|는|에|도|만|의|로|으로|에서)$")
+
+
+def rule_explains(query):
+    """규칙(rule_parse)이 질문의 모든 단어를 이해했는지. 메뉴 이름 같은 낯선 단어가 남으면 False → LLM 에게 물어봐요."""
+    q = query.lower()
+    for w in sorted(RULE_TRIGGERS, key=len, reverse=True):
+        q = q.replace(w, " ")
+    for t in re.findall(r"[가-힣A-Za-z0-9]{2,}", q):
+        t2 = _JOSA.sub("", t) if len(t) > 2 else t
+        if t in STOPWORDS or t2 in STOPWORDS or t in _FILLER or t2 in _FILLER:
+            continue
+        return False
+    f = rule_parse(query)
+    return any(f.get(k) for k in FLAG_KEYS) or bool(f.get("sort"))
+
+
 def search(query, here=None, sort=None, taste=None):
     """sort: 이용자가 고른 정렬. 'distance'(거리순) / 'recommend'(추천순). None 이면 질문에서 읽은 선호를 따라요.
     taste: 로그인 회원이 가입 때 고른 취향 {섹션: [항목 id]} (LLM 이 순위를 정하는 rank 모드에서는 쓰지 않아요)."""
@@ -971,7 +993,7 @@ def search(query, here=None, sort=None, taste=None):
     # 지금(한국 시간) 영업이 끝났거나 쉬는 날인 곳은 추천에서 빼요. 영업시간을 모르는 곳은 남겨요.
     cafes = [c for c in allc if is_open_now(c.get("hours") or {}, now) is not False]
     q = query.strip().lower()
-    base = (q, CAFES_PATH.stat().st_mtime)
+    base = (re.sub(r"\s+", " ", q), CAFES_PATH.stat().st_mtime)
     if LLM_MODE == "rank" and GEMINI_API_KEY:     # LLM 이 순위까지 정하는 모드: 영업 상황이 바뀌니 분 단위로만 캐시
         key = base + (now.strftime("%Y%m%d%H%M"),)
         if key in _cache:
@@ -989,7 +1011,9 @@ def search(query, here=None, sort=None, taste=None):
         flags = dict(flags)
     else:
         flags, source, notice = None, "keyword", ""
-        if GEMINI_API_KEY:
+        if GEMINI_API_KEY and rule_explains(query):         # 규칙으로 충분히 이해되는 질문은 LLM 없이 바로 (속도)
+            flags, source = rule_parse(query), "rule"
+        elif GEMINI_API_KEY:
             try:
                 flags = llm_parse(query)
                 flags["sort"] = flags["sort"] or rule_sort(q)   # LLM이 놓친 정렬 선호는 규칙이 보충
@@ -1011,7 +1035,7 @@ def search(query, here=None, sort=None, taste=None):
         else:
             notice = "GEMINI_API_KEY가 비어 있어 키워드 매칭 모드예요"
         flags = flags or rule_parse(query)
-        if source == "llm" or not GEMINI_API_KEY:  # 실패 결과는 캐싱하지 않음
+        if source in ("llm", "rule") or not GEMINI_API_KEY:  # 실패 결과는 캐싱하지 않음
             if len(_cache) > 200:
                 _cache.clear()
             _cache[base] = (dict(flags), source, notice)
