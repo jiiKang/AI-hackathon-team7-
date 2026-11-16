@@ -242,7 +242,10 @@ def public(c, rank=None, reason="", matched=None):
         "id": c["id"], "src_id": c.get("src_id", ""), "name": c.get("name", ""), "address": c.get("address", ""),
         "lat": c["lat"], "lng": c["lng"], "summary": summarize(c), "notes": notes(c),
         "photos": _photos(c), "basis": basis(c), "open_now": is_open_now(c.get("hours") or {}),
+<<<<<<< HEAD
         "franchise": is_franchise(c), "vibe": vibe_hits(c),
+=======
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
     }
     if rank is not None:
         d.update(rank=rank, reason=reason, matched=matched or [])
@@ -256,7 +259,10 @@ FLAG_LABELS = {
     "work": "작업·공부", "outlets": "콘센트", "wifi": "와이파이", "group": "단체·여럿", "solo": "혼자",
     "large": "넓은 좌석", "quiet": "조용함", "lively": "활기찬 분위기",
     "dessert": "디저트", "decaf": "디카페인",
+<<<<<<< HEAD
     "vibe": "분위기 좋은", "franchise": "프랜차이즈", "indie": "개인 카페",
+=======
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
 }
 FLAG_KEYS = tuple(FLAG_LABELS)
 STOPWORDS = {"카페", "안암", "안암동", "추천", "알려줘", "있는", "곳", "좋은", "해줘", "같은", "어디", "근처", "하는", "찾아줘", "보여줘", "가고", "싶어",
@@ -290,6 +296,7 @@ def is_chain(c):
     return any(n in (c.get("name") or "") for n in CHAINS)
 
 
+<<<<<<< HEAD
 # 프랜차이즈 구분 (검색 조건 '프랜차이즈'/'개인 카페'와 카드·상세의 배지에 써요). CHAINS 는 '콘센트·와이파이가 있을 것'으로 보는 대형 체인이고,
 # 여기는 테이크아웃형 저가 체인까지 포함한 전체 목록이에요. 늘리려면 이름만 추가하세요.
 FRANCHISE_BRANDS = ("스타벅스", "투썸", "탐앤탐스", "커피빈", "할리스", "엔제리너스", "폴바셋", "파스쿠찌", "카페베네",
@@ -341,6 +348,8 @@ def vibe_hits(c):
     return out
 
 
+=======
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
 def _belief_src(c, key):
     """(값, 확신도 0~1, 출처). 정보가 없으면 ('', 0, ''). 예전 형식 cafes.json(belief 없음)도 읽어요."""
     b = (c.get("belief") or {}).get(key)
@@ -450,12 +459,16 @@ def rule_parse(query):
         "large": has("넓", "대형"),
         "dessert": has("디저트", "빵", "베이커리", "케이크", "쿠키", "마카롱", "스콘"),
         "decaf": has("디카페인"),
+<<<<<<< HEAD
         "vibe": has("분위기 좋", "분위기좋", "분위기 있", "분위기있", "분위기 맛집", "분위기 예쁜", "분위기 이쁜", "무드", "감성"),
     }
     # 프랜차이즈: '프랜차이즈 아닌/말고/빼고'는 개인 카페, 그 외 '프랜차이즈/체인/프차'는 프랜차이즈
     neg = re.search(r"(프랜차이즈|체인|프차)\s*(이?\s*아닌|가\s*아닌|말고|빼고|제외|없는|아니)", q) or has("개인 카페", "개인카페", "개인 운영", "개인운영", "동네 카페", "동네카페", "독립 카페")
     f["indie"] = bool(neg)
     f["franchise"] = has("프랜차이즈", "체인", "프차") and not neg
+=======
+    }
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
     f = {k: (True if v else None) for k, v in f.items()}
     f["sort"] = rule_sort(q)
     f["words"] = []              # 화면 칩에는 규칙이 확신한 조건만 보여줌
@@ -630,10 +643,13 @@ def _score_all(f, cafes):
             except ValueError:
                 pass
 
+<<<<<<< HEAD
         if f.get("vibe"):
             vh = vibe_hits(c)
             if vh:
                 hit(3 + 0.5 * (len(vh) - 1), "·".join(vh[:3]))
+=======
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
         desserts, drinks = _list(m.get("desserts")), _list(m.get("drinks"))
         if f.get("dessert") and desserts:
             score += min(len(desserts), 5) * 0.4
@@ -758,15 +774,22 @@ def llm_parse(query):
         "- lively: 활기차고 시끌벅적한 곳\n"
         "- dessert: 디저트·빵·케이크를 원함\n"
         "- decaf: 디카페인\n"
+<<<<<<< HEAD
         "- vibe: 분위기 좋은/감성/무드 있는 카페를 원함 (\"분위기 좋은\", \"감성 카페\", \"분위기 있는\")\n"
         "- franchise: 프랜차이즈·체인 카페를 원함\n"
         "- indie: 프랜차이즈가 아닌 개인·동네 카페를 원함 (\"프랜차이즈 말고\", \"개인 카페\")\n"
+=======
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
         "- sort: 정렬 선호. 질문에 있을 때만 \"reviews\"(리뷰·후기 많은/인기), \"distance\"(가까운), \"rating\"(별점·평점 높은) 중 하나, 아니면 null\n"
         "- words: 질문에 나온 구체적인 메뉴·분위기 단어(예: 티라미수, 아인슈페너, 감성, 테라스), 최대 4개, 없으면 []\n"
         f"현재: {'월화수목금토일'[now.weekday()]}요일 {now:%H:%M}\n"
         f"질문: {json.dumps(query, ensure_ascii=False)}\n"
         '출력 형식: {"open_now":null,"late":null,"early":null,"work":null,"outlets":null,"wifi":null,"group":null,'
+<<<<<<< HEAD
         '"solo":null,"large":null,"quiet":null,"lively":null,"dessert":null,"decaf":null,"vibe":null,"franchise":null,"indie":null,"sort":null,"words":[]}'
+=======
+        '"solo":null,"large":null,"quiet":null,"lively":null,"dessert":null,"decaf":null,"sort":null,"words":[]}'
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
     )
     text = call_llm(prompt).strip()
     text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.M).strip()
@@ -889,6 +912,7 @@ def has_info(c):
     )
 
 
+<<<<<<< HEAD
 
 # ------------------------------------------------------- 실패·대체 안내 (CUBIG OT 제안: 못 찾았을 때 줄글 2~3줄로 알려주기)
 _NOT_MENU = {"콘센트", "와이파이", "자리", "좌석", "단체석", "주차", "화장실", "공간", "카페", "곳", "장소", "분위기", "메뉴", "음료", "커피"}
@@ -945,6 +969,8 @@ def build_guide(query, flags, understood, results, cafes):
     return f"{line1}\n{line2}\n메뉴는 바뀔 수 있으니 가기 전에 카페에 확인해 보세요."
 
 
+=======
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
 def search(query, here=None, sort=None, taste=None):
     """sort: 이용자가 고른 정렬. 'distance'(거리순) / 'recommend'(추천순). None 이면 질문에서 읽은 선호를 따라요.
     taste: 로그인 회원이 가입 때 고른 취향 {섹션: [항목 id]} (LLM 이 순위를 정하는 rank 모드에서는 쓰지 않아요)."""
@@ -1005,6 +1031,7 @@ def search(query, here=None, sort=None, taste=None):
         flags["sort"] = "distance"
     elif sort == "recommend":
         flags["sort"] = None
+<<<<<<< HEAD
     if flags.get("franchise") and flags.get("indie"):      # 둘 다 오면 서로 모순이라 둘 다 무시
         flags["franchise"] = flags["indie"] = None
     understood = describe_flags(flags)
@@ -1024,18 +1051,30 @@ def search(query, here=None, sort=None, taste=None):
         else:
             safe = (safe + " · " if safe else "") + ("프랜차이즈" if want else "개인 카페") + " 조건에 맞는 곳이 없어 조건을 풀었어요"
     taste, tf = clean_taste(taste), None
+=======
+    understood = describe_flags(flags)
+    taste, tf, safe = clean_taste(taste), None, ""
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
     if taste:       # 회원 취향(보조): 질문 조건과 따로 점수를 매겨 절반만 합치고, '꼭 필요'가 없다고 확인된 곳만 빼요
         kept = [c for c in cafes if not any(_lacks(c, i) for i in taste.get("must", []))]
         if len(kept) >= MAX_RESULTS:
             cafes = kept
         else:
+<<<<<<< HEAD
             safe = (safe + " · " if safe else "") + "취향의 '꼭 필요' 조건에 맞는 곳이 적어서 이번에는 조건을 풀었어요"
+=======
+            safe = "취향의 '꼭 필요' 조건에 맞는 곳이 적어서 이번에는 조건을 풀었어요"
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
         tf, chip, dropped = apply_taste(flags, taste)
         understood += ([chip] if chip else []) + ([f"이번 질문과 달라 뺀 취향 · {', '.join(dropped)}"] if dropped else [])
     results, note = rank_by_flags(flags, cafes, here, tf)
     notice = " · ".join(x for x in (notice, safe, note) if x) or ("" if results else "지금 영업 중이면서 조건에 맞는 카페를 찾지 못했어요")
+<<<<<<< HEAD
     guide = build_guide(query, flags, understood, results, all_cafes)
     return {"results": results, "source": source, "notice": notice, "understood": understood, "guide": guide,
+=======
+    return {"results": results, "source": source, "notice": notice, "understood": understood,
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
             "sort": "distance" if flags.get("sort") == "distance" else "recommend"}
 
 
