@@ -93,7 +93,7 @@ const app = $("#app"), sheet = $("#sheet"), body = $("#body"), page = $("#page")
 
 /* ---------- 상태 ---------- */
 const S = { all: [], results: [], understood: [], notice: "", guide: "", suggest: [], votes: store.get("votes", {}), query: "", selected: null, token: 0, here: null, sort: null,   // sort: 결과가 실제로 어떤 정렬인지(서버가 알려줌). 주소 검색은 null
-  cur: { view: "home" }, stack: [], qa: store.get("qa", {}), hist: store.get("hist", []) };
+  cur: { view: "home" }, stack: [], qa: store.get("qa", {}), hist: store.get("hist", []), rooms: store.get("rooms", []), room: null };   // rooms: 대화방(질문·답이 이어지는 세션), room: 지금 열린 대화방
 let map = null, overlays = [], hereOverlay = null;
 
 /* ---------- 회원 (Supabase Auth · Google 로그인) ----------
@@ -188,8 +188,8 @@ function logSearch(q) {
 }
 
 /* ---------- 기록·취향 (이 기기에만 저장) ---------- */
-function pushHist(q, und, snap) {
-  S.hist = [{ q, und: und || [], t: Date.now(), snap }, ...S.hist.filter(h => h.q !== q)].slice(0, 30);
+function pushHist(q, und, snap, room) {
+  S.hist = [{ q, und: und || [], t: Date.now(), snap, room }, ...S.hist.filter(h => h.q !== q)].slice(0, 30);
   store.set("hist", S.hist);
 }
 function snapResults() {                // 결과 카드(카페 id·순위·이유)만 저장해 두면, 다시 열 때 서버·AI를 안 거치고 그대로 복원해요
@@ -224,6 +224,56 @@ function openAsk(id) {                  // 최근 대화의 '장소에 물어본
   if (!cafeById(id)) return;
   S.selected = id; qEl.value = "";
   go("ask", id); scrollQA();
+}
+/* ---------- 대화방: 질문과 답(결과 카드)이 한 방에 이어져요 ---------- */
+const msgCards = m => (m.ids || []).map(x => { const c = S.all.find(a => a.id === x.id); return c && { ...c, ...x }; }).filter(Boolean);   // 저장해 둔 id·순위·이유로 카드 복원
+function saveRooms() {                  // 이 기기에 저장: 방 20개·방마다 메시지 40개까지 (답을 기다리는 중인 것은 빼요)
+  S.rooms = S.rooms.slice(0, 20);
+  store.set("rooms", S.rooms.map(r => ({ ...r, msgs: r.msgs.filter(m => !m.wait).slice(-40) })));
+}
+function renderRoom(toEnd = true) {
+  const el = $("#room");
+  if (S.cur.view !== "chat") return;
+  if (!el) draw(); else el.innerHTML = V.roomMsgs();
+  if (toEnd) pbody.scrollTop = pbody.scrollHeight;
+}
+function openRoom(id) {                 // 최근 대화에서 방을 다시 열기: 이어서 물어볼 수 있어요
+  const r = S.rooms.find(x => x.id === id);
+  if (!r) return;
+  S.room = r; S.rooms = [r, ...S.rooms.filter(x => x !== r)]; saveRooms();
+  qEl.value = ""; go("chat"); pbody.scrollTop = pbody.scrollHeight;
+}
+async function roomSend(q, pick = null, label = "") {
+  q = (q || "").trim();
+  if (!q) return;
+  if (!S.room) { S.room = { id: Date.now(), t: Date.now(), title: q, msgs: [] }; S.rooms.unshift(S.room); }
+  const room = S.room, w = { r: "a", wait: true };
+  room.msgs.push({ r: "u", text: label || q }, w); room.t = Date.now();
+  S.rooms = [room, ...S.rooms.filter(x => x !== room)];
+  qEl.value = ""; qEl.blur(); setPh(); renderRoom();
+  try {
+    const r = await fetch("/api/search", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: q, ...(pick ? { sort: pick } : {}), ...(A.taste && !A.taste.skipped ? { taste: A.taste.choices } : {}) }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `오류 (${r.status})`);
+    const ids = (j.results || []).map(x => ({ id: x.id, rank: x.rank, reason: x.reason, matched: x.matched, info: x.info, dist_m: x.dist_m }));
+    Object.assign(w, { wait: false, k: "res", q, ids, und: j.understood || [], notice: j.notice || "", guide: j.guide || "", suggest: j.suggest || [], sort: j.sort || "recommend" });
+    if (!pick && ids.length) {          // 처음 묻는 질문만 기록에 남겨요 (정렬만 바꾼 재검색은 제외)
+      pushHist(q, w.und, { r: ids.map(({ id, rank, reason, matched }) => ({ id, rank, reason, matched })), notice: w.notice, guide: w.guide, suggest: w.suggest, sort: w.sort }, room.id);
+      logSearch(q);
+    }
+  } catch (e) { Object.assign(w, { wait: false, k: "err", text: e.message || "검색에 실패했어요. 잠시 후 다시 시도해 주세요." }); }
+  saveRooms(); renderRoom();
+}
+function roomMap(i) {                   // 대화 속 결과를 지도 화면으로 열기 (뒤로 가면 대화방으로 돌아와요)
+  const m = S.room && S.room.msgs[i]; if (!m || m.k !== "res") return;
+  S.stack.push(S.cur); ++S.token;
+  Object.assign(S, { query: m.q, selected: null, here: null, pick: null, noTaste: false, results: msgCards(m), understood: m.und || [],
+    notice: m.notice || "", guide: m.guide || "", suggest: m.suggest || [], sort: m.sort || "recommend" });
+  showResults(true);
+}
+function roomsList() {
+  return `<div class="sec"><b>대화</b></div><ul class="hist">${S.rooms.map(r => `<li><button data-room="${r.id}">${esc(r.title)}<small>${ago(r.t)} · 질문 ${r.msgs.filter(m => m.r === "u").length}개</small></button></li>`).join("")}</ul>`;
 }
 function prefs() {                      // 자주 쓴 조건 순서
   const n = {};
@@ -289,13 +339,32 @@ const V = {
   },
 
   /* 채팅: 검색 Tip (표지판이 아래로 내려온 상태) */
-  chat: () => `<div class="page" data-screen="chat">
+  chat: () => S.room && S.room.msgs.length ? `<div class="page" data-screen="chat">
+    <div class="toprow">${(S.stack[S.stack.length - 1] || {}).view === "history" ? '<button class="back" data-back>← 최근 대화</button>' : '<button class="back" data-home>← 처음으로</button>'}<button class="newchat" data-newchat>＋ 새 대화</button></div>
+    <div class="room" id="room">${V.roomMsgs()}</div>
+  </div>` : `<div class="page" data-screen="chat">
     <div class="toprow"><button class="back" data-home>← 처음으로</button></div>
     <div class="tipbox">
       <h2>검색 Tip.</h2><p class="sub">이렇게 물어보면 더 정확해요</p>
       <ul class="tips">${tips().map((t, i) => `<li><button type="button" data-tip="${i}">${esc(t.pre)}<em>${esc(t.em)}</em>${esc(t.post)}</button></li>`).join("")}</ul>
     </div>
   </div>`,
+
+  /* 대화방 메시지: 내 질문은 오른쪽 말풍선, 답(조건·정렬·결과 카드)은 왼쪽 */
+  roomMsgs: () => S.room.msgs.map((m, i) => {
+    if (m.r === "u") return `<div class="bubble q">${esc(m.text)}</div>`;
+    if (m.wait) return `<div class="bubble a wait"><span class="dots"><i></i><i></i><i></i></span></div>`;
+    if (m.k === "err") return `<div class="bubble a">${esc(m.text)}</div>`;
+    const cs = msgCards(m);
+    return `<div class="abox">
+      <div class="bubble a">${cs.length ? `“${esc(m.q)}” 조건으로 찾아봤어요.` : "조건에 맞는 카페를 찾지 못했어요. 다르게 물어봐 주세요."}</div>
+      ${m.und && m.und.length ? `<div class="und">이렇게 이해했어요 ${m.und.map(u => `<span class="c">${esc(u)}</span>`).join("")}</div>` : ""}
+      ${cs.length && m.sort ? `<div class="sortbar"><button type="button" data-rsort="recommend" data-ri="${i}"${m.sort === "recommend" ? ' class="on"' : ""}>추천순</button><button type="button" data-rsort="distance" data-ri="${i}"${m.sort === "distance" ? ' class="on"' : ""}>거리순</button><span class="hint">거리는 안암역 기준</span></div>` : ""}
+      ${m.guide ? `<p class="guide">${esc(m.guide).replace(/\n/g, "<br>")}</p>` : ""}${m.notice ? `<span class="notice">${esc(m.notice)}</span>` : ""}
+      ${cs.length ? `<ol class="cards">${cs.map(V.card).join("")}</ol><button type="button" class="link rmap" data-rmap="${i}">지도에서 한꺼번에 보기</button>` : ""}
+      ${cs.length < 5 && (m.suggest || []).length ? `<div class="rchips wrap">${m.suggest.map(q => `<button class="rchip" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div>` : ""}
+    </div>`;
+  }).join(""),
 
   /* 검색 중 */
   loading: q => `<div data-screen="loading">
@@ -393,7 +462,7 @@ const V = {
   },
   qa: id => {
     const l = S.qa[id] || [];
-    return l.length ? `<h3>이 카페에 물어본 내용</h3>` + l.map(x => `<div class="bubble q">${esc(x.q)}</div><div class="bubble a${x.a == null ? " wait" : ""}">${x.a == null ? "찾는 중…" : esc(x.a)}</div>`).join("") + `<button class="link gray clr" data-qaclear>이 대화 지우기</button>` : "";
+    return l.length ? `<h3>이 카페에 물어본 내용</h3>` + l.map(x => `<div class="bubble q">${esc(x.q)}</div><div class="bubble a${x.a == null ? " wait" : ""}">${x.a == null ? '<span class="dots"><i></i><i></i><i></i></span>' : esc(x.a)}</div>`).join("") + `<button class="link gray clr" data-qaclear>이 대화 지우기</button>` : "";
   },
 
   /* 장소에 대해 AI에게 묻기: 이 카페 정보만 가지고 답해요 (아래 표지판으로 질문) */
@@ -504,7 +573,7 @@ const V = {
   history: () => { const chats = qaChats(); return `<div class="page" data-screen="history">
     <div class="toprow"><h2 class="pagetitle">최근 대화</h2><button class="newchat" data-newchat>＋ 새 대화</button></div>
     ${acctHtml()}
-    ${S.hist.length || chats.length ? `${S.hist.length ? `<ul class="hist">${S.hist.map((h, i) => `<li><button data-hq="${i}">${esc(h.q)}<small>${ago(h.t)}${h.und && h.und.length ? " · " + h.und.map(esc).join(" · ") : ""}${h.snap ? " · 이어서 보기" : ""}</small></button></li>`).join("")}</ul>` : ""}${chats.length ? `<div class="sec"><b>장소에 물어본 대화</b></div><ul class="hist">${chats.map(x => { const last = x.l[x.l.length - 1]; return `<li><button data-aid="${x.id}">${esc(x.c.name)}<small>${ago(last.t)} · 질문 ${x.l.length}개 · ${esc(last.q)}</small></button></li>`; }).join("")}</ul>` : ""}<button class="link gray clr" data-clear>기록 지우기</button>`
+    ${S.hist.length || chats.length || S.rooms.length ? `${S.rooms.length ? roomsList() : ""}${S.hist.length ? `<ul class="hist">${S.hist.map((h, i) => h.room && S.rooms.some(r => r.id === h.room) ? "" : `<li><button data-hq="${i}">${esc(h.q)}<small>${ago(h.t)}${h.und && h.und.length ? " · " + h.und.map(esc).join(" · ") : ""}${h.snap ? " · 이어서 보기" : ""}</small></button></li>`).join("")}</ul>` : ""}${chats.length ? `<div class="sec"><b>장소에 물어본 대화</b></div><ul class="hist">${chats.map(x => { const last = x.l[x.l.length - 1]; return `<li><button data-aid="${x.id}">${esc(x.c.name)}<small>${ago(last.t)} · 질문 ${x.l.length}개 · ${esc(last.q)}</small></button></li>`; }).join("")}</ul>` : ""}<button class="link gray clr" data-clear>기록 지우기</button>`
       : '<p class="lead">아직 대화 기록이 없어요. 오른쪽 위 \'새 대화\'를 눌러 물어보세요.</p>'}
   </div>`; },
 };
@@ -534,8 +603,8 @@ function draw() {
   setH(curH, false);                   // 메뉴가 나타나거나 사라지면 시트·버튼 높이를 다시 맞춰요
   ensureSentinel();
 }
-function newChat() {                    // 최근 대화 화면의 '새 대화': 검색 Tip 화면 + 키보드
-  S.stack = [{ view: "home" }]; S.cur = { view: "chat" };
+function newChat() {                    // '새 대화': 검색 Tip 화면 + 키보드 (새 대화방)
+  S.room = null; S.stack = [{ view: "home" }]; S.cur = { view: "chat" };
   qEl.value = ""; draw(); qEl.focus();
 }
 function navTo(id) {                    // 하단 메뉴로 이동: 쌓인 화면을 비우고 해당 화면으로
@@ -591,6 +660,7 @@ function back() {
   S.cur = p;
   if (p.view === "home" || p.view === "results") { S.selected = null; drawMarkers(); }
   draw();
+  if (p.view === "chat") pbody.scrollTop = pbody.scrollHeight;       // 대화방으로 돌아오면 마지막 대화가 보이게
   if (p.view === "home") snapTo("home"); else if (p.view === "results") { snapTo("mid"); } else if (p.view === "peek") snapTo("peek");
   if (p.view === "results" || p.view === "home") { qEl.value = p.view === "results" ? S.query : ""; setPh(); }
 }
@@ -604,7 +674,7 @@ window.addEventListener("popstate", () => {
 
 function goHome() {                     // 처음 화면 (검색 결과·선택·입력 모두 비움)
   S.token++;
-  Object.assign(S, { results: [], understood: [], notice: "", guide: "", suggest: [], query: "", selected: null, here: null, sort: null, stack: [], cur: { view: "home" } });
+  Object.assign(S, { results: [], understood: [], notice: "", guide: "", suggest: [], query: "", selected: null, here: null, sort: null, room: null, stack: [], cur: { view: "home" } });
   qEl.value = ""; qEl.blur();
   drawMarkers(); resetMap();
   draw(); snapTo("home");
@@ -961,7 +1031,12 @@ document.addEventListener("click", e => {
   if (ac) return openAsk(+ac.dataset.aid);
   if (t.closest("[data-qaclear]")) { delete S.qa[S.selected]; saveQA(); return renderQA(); }
   const q = t.closest("[data-q]");
-  if (q) return search(q.dataset.q);
+  if (q) return S.cur.view === "chat" ? roomSend(q.dataset.q) : search(q.dataset.q);
+  const rs = t.closest("[data-rsort]");
+  if (rs) { const m = S.room && S.room.msgs[+rs.dataset.ri]; return m && m.sort !== rs.dataset.rsort ? roomSend(m.q, rs.dataset.rsort, rs.dataset.rsort === "distance" ? "거리순으로 보여줘" : "추천순으로 보여줘") : undefined; }
+  if (t.closest("[data-rmap]")) return roomMap(+t.closest("[data-rmap]").dataset.rmap);
+  const rm = t.closest("[data-room]");
+  if (rm) return openRoom(+rm.dataset.room);
   const tip = t.closest("[data-tip]");
   if (tip) { qEl.value = tips()[+tip.dataset.tip].ex; setPh(); return qEl.focus(); }
   const ts = t.closest("[data-ts]");
@@ -981,7 +1056,7 @@ document.addEventListener("click", e => {
   if (t.closest("[data-showmap]")) return showOnMap();
   if (t.closest("[data-history]")) return go("history");
   if (t.closest("[data-clear]")) {
-    S.hist = []; store.set("hist", []); S.qa = {}; store.set("qa", {});
+    S.hist = []; store.set("hist", []); S.qa = {}; store.set("qa", {}); S.rooms = []; S.room = null; store.set("rooms", []);
     if (A.user) A.sb.from("user_search_log").delete().eq("user_id", A.user.id).then(() => {});
     return draw();
   }
@@ -1011,6 +1086,7 @@ sign.addEventListener("submit", e => {
   if (view === "home") return openChat();
   if (!v) return;
   if (view === "ask") return ask(v);
+  if (view === "chat") return roomSend(v);
   search(v);
 });
 qEl.addEventListener("input", () => sign.classList.toggle("has-value", !!qEl.value));
