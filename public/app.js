@@ -609,11 +609,18 @@ function goHome() {                     // 처음 화면 (검색 결과·선택�
   drawMarkers(); resetMap();
   draw(); snapTo("home");
 }
-function openChat() {                   // 표지판을 눌렀을 때: 표지판이 아래로 내려오고 키보드가 올라와요
-  if (S.cur.view !== "home") return;
-  go("chat");
-  qEl.value = ""; setPh();
-  qEl.focus();
+let chatOpening = false;
+function openChat() {                   // 표지판을 눌렀을 때: 키보드를 먼저 올리고, 잠깐 뒤에 표지판이 아래로 내려오는 화면으로 넘어가요
+  if (S.cur.view !== "home" || chatOpening) return;
+  chatOpening = true;
+  qEl.focus();                          // 누른 순간(사용자 동작 안)에 포커스를 줘야 폰에서 키보드가 떠요. 입력창이 움직이는 중에 포커스를 주면 키보드가 안 뜨는 폰이 있어요
+  setTimeout(() => {
+    chatOpening = false;
+    if (S.cur.view !== "home") return;
+    go("chat");
+    qEl.value = ""; setPh();
+    qEl.focus();
+  }, 120);
 }
 function showResults(fit) {
   S.selected = null;
