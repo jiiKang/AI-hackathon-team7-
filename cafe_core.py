@@ -267,6 +267,7 @@ KST = timezone(timedelta(hours=9))
 # 거리 기준 위치: 현재 행정구역(안암동)의 중심인 안암역(6호선). 앱이 위치를 보내면 그걸 쓰고, 없으면 이걸 써요.
 HERE = (37.5861, 127.0292)     # (위도, 경도)
 SORTS = {"reviews": "리뷰 많은 순", "distance": "가까운 순", "rating": "별점 높은 순"}
+DIST_POOL = 15                 # 거리순: 조건 점수 상위 이 수만큼을 후보로 두고 가까운 순으로 줄세워요
 BAND = 0.85                    # 조건 점수가 1등의 85% 이상인 후보끼리만 정렬 선호(리뷰·거리·별점)로 다시 줄세워요
 # 속성 값이 '조건을 만족하는 정도'(0~1)와, 아무 정보가 없을 때의 기본 기대치(사전값)
 LEVEL = {
@@ -682,7 +683,7 @@ def rank_by_flags(f, cafes, here=None, tf=None):
     # 1순위: 질문 점수. 점수가 비슷한(1등의 BAND 이상) 후보끼리만 정렬 선호로 다시 줄세워요 (조건이 안 맞는 곳이 인기 때문에 올라오지 않게).
     rows.sort(key=lambda r: (-(r[sc] + TASTE_W * r["t"]), r["id"]))
     top = max((r[sc] for r in rows), default=0)
-    band = [r for r in rows if top <= 0 or r[sc] >= top * BAND]
+    band = rows[:DIST_POOL] if far else [r for r in rows if top <= 0 or r[sc] >= top * BAND]   # 거리순: 1등 점수가 튀어도 상위 DIST_POOL곳을 가까운 순으로
     dist = lambda c: _dist_m(here[0], here[1], c.get("lat"), c.get("lng"))
     key = {"distance": lambda r: (dist(r["c"]), r["id"]),
            "rating": lambda r: (-_rating(r["c"]), -_reviews(r["c"]), r["id"]),
