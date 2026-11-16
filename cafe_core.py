@@ -264,8 +264,8 @@ STOPWORDS = {"카페", "안암", "안암동", "추천", "알려줘", "있는", "
 KST = timezone(timedelta(hours=9))
 
 # ------------------------------------------------------- 확률 점수 (사전값 + 증거 → 확신도)
-# 거리 기준 위치: 앱이 현재 위치를 보내면 그걸 쓰고, 없으면 아래(테스트 가정: 고려대 정문)를 써요.
-HERE = (37.5896, 127.0322)     # (위도, 경도)
+# 거리 기준 위치: 현재 행정구역(안암동)의 중심인 안암역(6호선). 앱이 위치를 보내면 그걸 쓰고, 없으면 이걸 써요.
+HERE = (37.5861, 127.0292)     # (위도, 경도)
 SORTS = {"reviews": "리뷰 많은 순", "distance": "가까운 순", "rating": "별점 높은 순"}
 BAND = 0.85                    # 조건 점수가 1등의 85% 이상인 후보끼리만 정렬 선호(리뷰·거리·별점)로 다시 줄세워요
 # 속성 값이 '조건을 만족하는 정도'(0~1)와, 아무 정보가 없을 때의 기본 기대치(사전값)
@@ -700,6 +700,8 @@ def rank_by_flags(f, cafes, here=None, tf=None):
                     continue
             pick.append(r)
         ordered = pick + [r for r in ordered if r not in pick]
+    if any(r["why"] or r["unknown"] for r in ordered):       # 요청과 맞는 정보가 하나도 없는 카페는 빼요 (맞는 곳이 있을 때만)
+        ordered = [r for r in ordered if r["why"] or r["unknown"]]
     out = []
     for i, r in enumerate(ordered[:MAX_RESULTS], 1):
         c, unknown = r["c"], r["unknown"]
@@ -913,11 +915,24 @@ def _corpus(cafes):
 def asked_terms(query, flags):
     """질문에서 '이걸 파는 곳' 처럼 구체적으로 찾은 메뉴·분위기 단어 후보."""
     terms = [w for w in (flags.get("words") or []) if len(w) >= 2]
-    for m in re.finditer(r"([가-힣A-Za-z0-9]{2,})\s*(?:을|를)?\s*(?:파는|팔고|판매|있는|먹을|마실)", query):
+    for m in re.finditer(r"([가-힣A-Za-z0-9]{2,}?)\s*(?:을|를)?\s*(?:파는|팔고|판매|있는|먹을|마실)", query):
         w = m.group(1)
+        if len(w) > 2 and w[-1] in "을를":        # '샌드위치를' → '샌드위치'
+            w = w[:-1]
         if w not in STOPWORDS and w not in _NOT_MENU and w not in terms:
             terms.append(w)
     return terms
+
+
+def suggest_queries(query, flags):
+    """맞는 카페가 5곳보다 적을 때, 빈 자리 대신 보여줄 '이렇게 검색해 보세요' 추천."""
+    pool = (["빵 파는 카페", "케이크 있는 카페", "디저트 있는 카페"] if flags.get("dessert") else []) + \
+           ["분위기 좋은 카페", "콘센트 있는 조용한 카페", "지금 영업 중인 카페", "디저트 있는 카페", "늦게까지 하는 카페", "프랜차이즈 말고 개인 카페"]
+    out = []
+    for q in pool:
+        if q != query.strip() and q not in out:
+            out.append(q)
+    return out[:3]
 
 
 def build_guide(query, flags, understood, results, cafes):
@@ -1036,6 +1051,7 @@ def search(query, here=None, sort=None, taste=None):
     notice = " · ".join(x for x in (notice, safe, note) if x) or ("" if results else "지금 영업 중이면서 조건에 맞는 카페를 찾지 못했어요")
     guide = build_guide(query, flags, understood, results, all_cafes)
     return {"results": results, "source": source, "notice": notice, "understood": understood, "guide": guide,
+            "suggest": suggest_queries(query, flags) if (len(results) < MAX_RESULTS or guide) else [],
             "sort": "distance" if flags.get("sort") == "distance" else "recommend"}
 
 
@@ -1222,6 +1238,17 @@ def api_feedback(raw, length, ip="local"):
         assert isinstance(d, dict)
     except Exception:
         return 400, {"error": "잘못된 요청"}
+    if d.get("vote") in ("up", "down"):        # 👍/👎 의견: 기록만 하고 검색 결과에는 영향을 주지 않아요
+        cafe = next((c for c in load_cafes() if str(c["id"]) == str(d.get("cafe_id"))), None)
+        if not cafe:
+            return 400, {"error": "카페를 찾을 수 없어요"}
+        if rate_limited(ip, "feedback", 20):
+            return 429, {"error": "요청이 너무 많아요. 잠시 후 다시 시도해주세요"}
+        reasons = [r for r in (d.get("reasons") if isinstance(d.get("reasons"), list) else []) if r in FEEDBACK_FIELDS][:7]
+        text = str(d.get("text", "")).strip()[:300] if "etc" in reasons else ""
+        rec = {"ts": datetime.now(KST).isoformat(timespec="seconds"), "type": "vote", "vote": d["vote"], "cafe_id": cafe["id"], "cafe_name": cafe.get("name", ""),
+               "reasons": reasons, "reason_labels": [FEEDBACK_FIELDS[r] for r in reasons], "text": text, "query": str(d.get("query", "")).strip()[:100]}
+        return 200, {"ok": True, "stored": store_feedback(rec)}
     field = str(d.get("field", ""))
     if field not in FEEDBACK_FIELDS:
         return 400, {"error": "어떤 정보가 틀렸는지 골라주세요"}

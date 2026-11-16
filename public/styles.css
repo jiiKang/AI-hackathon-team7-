@@ -92,10 +92,6 @@ button { color: inherit; }
   background: repeating-linear-gradient(-45deg, var(--yellow) 0 7px, var(--black) 7px 14px); }
 [data-drag] { touch-action: none; }
 .hazard::after { content: ""; position: absolute; left: 0; right: 0; top: -16px; bottom: -12px; }   /* 얇아진 만큼 잡기 쉽게 터치 영역은 넓게 */
-.locate { position: absolute; right: 14px; z-index: 19; width: 44px; height: 44px; border-radius: 50%; border: 0; background: #fff; box-shadow: var(--shadow); display: none; place-items: center; cursor: pointer; transition: bottom .3s cubic-bezier(.2,.8,.2,1); }
-#app[data-mode="home"] .locate { display: grid; }
-#app[data-mode="home"][data-snap="full"] .locate { display: none; }
-.locate svg { width: 22px; height: 22px; stroke: var(--ink); fill: none; stroke-width: 1.9; stroke-linecap: round; }
 .peek { padding: 14px var(--pad) 0; }
 .peek .cname { font-size: 17px; }
 .peek .btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
@@ -328,7 +324,7 @@ button { color: inherit; }
 .dname .dtxt { min-width: 0; }
 .askbtn { flex: none; border: 0; border-radius: var(--r-pill); background: var(--blue); color: #fff; font-size: 13px; font-weight: 700; padding: 10px 14px; cursor: pointer; box-shadow: var(--shadow); white-space: nowrap; }
 .askbtn:active { background: var(--blue-dark); }
-.blue { color: var(--blue); }
+.pagetitle .blue { color: var(--blue); }
 .rchips.wrap { flex-wrap: wrap; overflow: visible; padding: 4px 0 6px; }
 .rchips.wrap .rchip { max-width: 100%; white-space: normal; }
 .page .qa { margin-top: 14px; }
@@ -371,3 +367,29 @@ button { color: inherit; }
 /* 못 찾았을 때·대체 결과 안내 (줄글 2~3줄) */
 .guide { margin: 10px 0 4px; padding: 12px 14px; border-radius: 14px; background: #f3f6fe; border-left: 4px solid var(--blue); color: var(--ink); font-size: 14px; line-height: 1.55; }
 .empty { white-space: pre-line; }
+
+/* 시작 화면 슬로건 */
+#welcome .tag { margin: -6px 0 0; color: var(--blue); font-size: 17px; font-weight: 700; letter-spacing: -.2px; text-align: center; animation: fadeUp .5s .2s ease both; }
+
+/* 👍/👎 의견 */
+.vote { display: inline-flex; gap: 6px; }
+.vbtn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: #fff; display: grid; place-items: center; cursor: pointer; color: #6b717a; padding: 0; }
+.vbtn svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.vbtn.up.on { background: #e6f7ee; color: #17935a; border-color: #17935a; } .vbtn.up.on svg { fill: currentColor; }
+.vbtn.down.on { background: #fdeceb; color: #d6453d; border-color: #d6453d; } .vbtn.down.on svg { fill: currentColor; }
+.card .vote { position: absolute; right: 12px; bottom: 10px; }
+.card { position: relative; }
+.votebar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 16px; padding: 12px 14px; border-radius: 14px; background: var(--gray-block); font-size: 14px; font-weight: 600; }
+#vmodal[hidden] { display: none; }
+#vmodal { position: absolute; inset: 0; z-index: 90; }
+#vmodal .vm-back { position: absolute; inset: 0; background: rgba(20,22,26,.45); }
+#vmodal .vm { position: absolute; left: 0; right: 0; bottom: 0; background: #fff; border-radius: 22px 22px 0 0; padding: 20px var(--pad) calc(18px + var(--safe-b)); display: grid; gap: 10px; max-height: 86%; overflow-y: auto; }
+#vmodal .vm-t { font-size: 18px; } #vmodal p { margin: 0; color: var(--muted); font-size: var(--fs-small); }
+#vmodal .vm-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+#vmodal .vm-chips button { border: 1px solid var(--line); background: #fff; border-radius: var(--r-pill); padding: 8px 14px; font-size: 14px; cursor: pointer; }
+#vmodal .vm-chips button.on { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 600; }
+#vmodal textarea { width: 100%; min-height: 80px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font: inherit; resize: vertical; }
+
+/* 검색 추천어 (맞는 카페가 5곳보다 적을 때) */
+.suggest { margin: 14px 0 6px; padding: 14px; border-radius: 16px; background: var(--gray-block); }
+.suggest b { font-size: 14px; } .suggest .rchips { padding: 8px 0 0; flex-wrap: wrap; overflow: visible; }

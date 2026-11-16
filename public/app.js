@@ -68,6 +68,8 @@ const ICON = {
   home:  '<path d="M4 11 12 4l8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/>',
   chat:  '<path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-4 3v-3H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/><path class="cut" d="M8.5 11h.01M12 11h.01M15.5 11h.01"/>',
   swipe: '<rect x="5" y="3.5" width="14" height="17" rx="2.5"/><path class="cut" d="M9 12h6M13 9l3 3-3 3"/>',
+  thumbUp: '<path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/>',
+  thumbDown: '<path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/>',
   bookmark: '<path d="M7 4.5h10a1 1 0 0 1 1 1V20l-6-4-6 4V5.5a1 1 0 0 1 1-1z"/>',
   heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.5A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
   info:  '<circle cx="12" cy="12" r="9"/><path class="cut" d="M12 11v5M12 8v.5"/>',
@@ -90,7 +92,7 @@ const app = $("#app"), sheet = $("#sheet"), body = $("#body"), page = $("#page")
   sign = $("#sign"), qEl = $("#q"), phEl = $("#ph"), navEl = $("#nav"), toastEl = $("#toast");
 
 /* ---------- 상태 ---------- */
-const S = { all: [], results: [], understood: [], notice: "", guide: "", query: "", selected: null, token: 0, here: null, sort: null,   // sort: 결과가 실제로 어떤 정렬인지(서버가 알려줌). 주소 검색은 null
+const S = { all: [], results: [], understood: [], notice: "", guide: "", suggest: [], votes: store.get("votes", {}), query: "", selected: null, token: 0, here: null, sort: null,   // sort: 결과가 실제로 어떤 정렬인지(서버가 알려줌). 주소 검색은 null
   cur: { view: "home" }, stack: [], qa: {}, hist: store.get("hist", []) };
 let map = null, overlays = [], hereOverlay = null;
 
@@ -192,20 +194,19 @@ function tips() {
 }
 const dayHash = (day, id) => { let x = 0; for (const ch of day + id) x = (x * 31 + ch.charCodeAt(0)) >>> 0; return x; };
 const closeHour = c => { const m = ((c.summary || {}).hours || "").match(/[–-]\s*(\d{1,2}):/); return m ? +m[1] : null; };
-function recSets() {                    // 홈 아래 추천 묶음 여러 개 (최근 대화가 생겨도 그대로 유지)
+function recSets() {                    // 홈 아래 추천 묶음: 최대 3개, 카페는 묶음끼리 겹치지 않아요
   const day = new Date().toDateString(), withPhoto = S.all.filter(c => (c.photos || []).length);
   const shuffle = l => [...l].sort((a, b) => dayHash(day, a.id) % 997 - dayHash(day, b.id) % 997);
   const keys = prefs().slice(0, 3).flatMap(p => p.split(/\s+/)).filter(w => w.length >= 2);
+  const used = new Set(), take = (l, n) => { const out = l.filter(c => !used.has(c.id)).slice(0, n); out.forEach(c => used.add(c.id)); return out; };
   const sets = [];
   if (keys.length) {
-    const scored = withPhoto.map(c => ({ c, s: keys.reduce((n, k) => n + (Object.values(c.summary || {}).join(" ").includes(k) ? 1 : 0), 0) })).filter(x => x.s).sort((a, b) => b.s - a.s);
-    if (scored.length >= 3) sets.push(["취향에 맞는 카페", scored.slice(0, 8).map(x => x.c)]);
+    const scored = withPhoto.map(c => ({ c, s: keys.reduce((n, k) => n + (Object.values(c.summary || {}).join(" ").includes(k) ? 1 : 0), 0) })).filter(x => x.s).sort((a, b) => b.s - a.s).map(x => x.c);
+    sets.push(["취향에 맞는 카페", take(scored, 6)]);
   }
-  sets.push(["오늘의 카페", shuffle(withPhoto).slice(0, 8)]);
-  sets.push(["분위기 좋은 카페", shuffle(withPhoto.filter(c => (c.vibe || []).length >= 2)).slice(0, 8)]);
-  sets.push(["늦게까지 여는 카페", shuffle(withPhoto.filter(c => { const h = closeHour(c); return h != null && (h >= 22 || h <= 4); })).slice(0, 8)]);
-  sets.push(["프랜차이즈 말고, 개인 카페", shuffle(withPhoto.filter(c => !c.franchise)).slice(0, 8)]);
-  return sets.filter(s => s[1].length >= 2);
+  sets.push(["분위기 좋은 카페", take(shuffle(withPhoto.filter(c => (c.vibe || []).length >= 2)), 6)]);
+  sets.push(["오늘의 카페", take(shuffle(withPhoto), 6)]);
+  return sets.filter(s => s[1].length >= 2).slice(0, 3);
 }
 const ago = t => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? "방금" : m < 60 ? `${m}분 전` : m < 1440 ? `${Math.round(m / 60)}시간 전` : `${Math.round(m / 1440)}일 전`; };
 function toast(msg) { toastEl.textContent = msg; toastEl.classList.add("on"); clearTimeout(toast.t); toast.t = setTimeout(() => toastEl.classList.remove("on"), 1800); }
@@ -257,12 +258,13 @@ const V = {
     <div class="rhead">
       <div class="rtitle"><b>“<span class="q">${esc(S.query)}</span>”</b><button class="link gray" data-home>처음으로</button></div>
       ${S.understood.length ? `<div class="und">이렇게 이해했어요 ${S.understood.map(u => `<span class="c">${esc(u)}</span>`).join("")}</div>` : ""}
-      ${S.sort ? `<div class="sortbar"><button type="button" data-sort="recommend"${S.sort === "recommend" ? ' class="on"' : ""}>추천순</button><button type="button" data-sort="distance"${S.sort === "distance" ? ' class="on"' : ""}>거리순</button><span class="hint">거리는 ${S.me ? "내 위치" : "고려대 정문"} 기준</span></div>` : ""}
+      ${S.sort ? `<div class="sortbar"><button type="button" data-sort="recommend"${S.sort === "recommend" ? ' class="on"' : ""}>추천순</button><button type="button" data-sort="distance"${S.sort === "distance" ? ' class="on"' : ""}>거리순</button><span class="hint">거리는 안암역 기준</span></div>` : ""}
       ${S.guide ? `<p class="guide">${esc(S.guide).replace(/\n/g, "<br>")}</p>` : ""}
       ${S.notice ? `<span class="notice">${esc(S.notice)}</span>` : ""}
       ${S.sort && A.taste && !A.taste.skipped && Object.keys(A.taste.choices || {}).length ? `<button type="button" class="link gray" data-notaste>${S.noTaste ? "내 취향 다시 적용하기" : "이번엔 내 취향 빼고 찾기"}</button>` : ""}
     </div>
     <ol class="cards">${S.results.map(V.card).join("")}</ol>
+    ${S.results.length < 5 && S.suggest.length ? `<div class="suggest"><b>이렇게 검색해 보면 어때요?</b><div class="rchips">${S.suggest.map(q => `<button class="rchip" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div></div>` : ""}
     <div class="sheetfoot"><span>${esc(TEXT.footLine)}</span><button type="button" data-sources>${esc(TEXT.footMore)}</button></div>
   </div>`,
   card: c => {
@@ -278,8 +280,12 @@ const V = {
         ${chips.length ? `<div class="kw">${chips.map(k => `<span>${esc(k)}</span>`).join("")}</div>` : ""}
       </div>
       ${ph ? `<div class="thumb"><img src="${esc(safeUrl(ph.url))}" alt="" loading="lazy" referrerpolicy="no-referrer"></div>` : ""}
+      ${V.vote(c)}
     </li>`;
   },
+  vote: c => `<div class="vote">
+    <button type="button" class="vbtn up${S.votes[c.id] === "up" ? " on" : ""}" data-vote="up" data-vid="${c.id}" aria-label="좋아요">${ico("thumbUp", "")}</button>
+    <button type="button" class="vbtn down${S.votes[c.id] === "down" ? " on" : ""}" data-vote="down" data-vid="${c.id}" aria-label="별로예요">${ico("thumbDown", "")}</button></div>`,
   info: c => c.info ? `<span class="badge lv ${{ "확인됨": "ok", "일부 추정": "mid", "정보 부족": "low" }[c.info] || ""}" title="질문한 조건의 정보가 얼마나 확실한지">${esc(c.info)}</span>` : "",   // 서버가 정한 정보 수준
   badge: c => (c.open_now === true ? '<span class="badge open">영업 중</span>' : c.open_now === false ? '<span class="badge closed">영업 종료</span>' : "")
     + (c.franchise ? '<span class="badge fr">프랜차이즈</span>' : ""),
@@ -321,6 +327,7 @@ const V = {
         ${c.basis ? `<div class="basis">근거: ${esc(c.basis)}</div>` : ""}
       </div>
       ${V.photos(c)}
+      <div class="votebar"><span>이 카페 추천, 어땠나요?</span>${V.vote(c)}</div>
       <div class="actions">
         <a class="go blue" href="${esc(nav)}" target="_blank" rel="noopener">카카오맵에서 길찾기</a>
         <button class="btn2" data-feedback>정보가 달라요</button>
@@ -481,7 +488,7 @@ function navTo(id) {                    // 하단 메뉴로 이동: 쌓인 화�
   S.token++;
   if (view === "swipe") { const pool = S.all.filter(c => (c.photos || []).length), day = new Date().toDateString();
     SW.deck = pool.sort((x, y) => dayHash(day + SW.seed, x.id) % 9973 - dayHash(day + SW.seed, y.id) % 9973).slice(0, 20); SW.i = 0; }
-  Object.assign(S, { results: [], understood: [], notice: "", guide: "", query: "", selected: null, here: null, sort: null, stack: [{ view: "home" }], cur: { view } });
+  Object.assign(S, { results: [], understood: [], notice: "", guide: "", suggest: [], query: "", selected: null, here: null, sort: null, stack: [{ view: "home" }], cur: { view } });
   qEl.value = ""; qEl.blur(); drawMarkers(); draw();
 }
 function swipeEnd(dir, card) {          // 카드를 밀어 보내는 모션 (결과 저장·학습은 없음)
@@ -540,7 +547,7 @@ window.addEventListener("popstate", () => {
 
 function goHome() {                     // 처음 화면 (검색 결과·선택·입력 모두 비움)
   S.token++;
-  Object.assign(S, { results: [], understood: [], notice: "", guide: "", query: "", selected: null, here: null, sort: null, stack: [], cur: { view: "home" } });
+  Object.assign(S, { results: [], understood: [], notice: "", guide: "", suggest: [], query: "", selected: null, here: null, sort: null, stack: [], cur: { view: "home" } });
   qEl.value = ""; qEl.blur();
   drawMarkers(); resetMap();
   draw(); snapTo("home");
@@ -583,17 +590,17 @@ const H = () => app.clientHeight || window.innerHeight;
 const navH = () => app.dataset.menu === "1" ? navEl.offsetHeight : 0;       // 하단 메뉴 높이 (숨겨졌으면 0)
 const SN = {
   get peek() { return 320; },
-  get home() { return Math.round(Math.min(H() * 0.44, 420)); },
+  get mini() { return 96; },                                                    // 아래로 내려둔 상태 (주소 검색만 보임)
+  get home() { return Math.max(200, Math.round(H() * 0.38) - navH()); },       // 기본: 메뉴바를 포함해 화면의 약 38%
   get mid() { return Math.round(H() * 0.56); },
   get full() { return Math.round(H() - navH() - 22); },
 };
 let curH = 0;
-function allowed() { const v = S.cur.view; return v === "home" ? ["home", "full"] : v === "peek" ? ["peek", "mid"] : ["peek", "mid", "full"]; }
+function allowed() { const v = S.cur.view; return v === "home" ? ["mini", "home", "full"] : v === "peek" ? ["peek", "mid"] : ["peek", "mid", "full"]; }
 function setH(h, animate = true) {
-  curH = Math.max(SN.peek - 60, Math.min(SN.full, h));
+  curH = Math.max(60, Math.min(SN.full, h));
   sheet.classList.toggle("dragging", !animate);
   sheet.style.height = curH + "px";
-  placeLocate();
 }
 function snapTo(k) { app.dataset.snap = k; setH(SN[k]); }
 function nearest(h) { return allowed().map(k => [k, SN[k]]).sort((a, b) => Math.abs(a[1] - h) - Math.abs(b[1] - h))[0][0]; }
@@ -613,20 +620,33 @@ function nearest(h) { return allowed().map(k => [k, SN[k]]).sort((a, b) => Math.
   const end = () => {
     if (!on) return; on = false;
     sheet.classList.remove("dragging");
-    if (!moved) { const a = allowed(); return snapTo(curH >= SN[a[a.length - 1]] - 20 ? a[0] : a[a.length - 1]); }
+    if (!moved) {
+      if (S.cur.view === "home") return snapTo({ mini: "home", home: "full", full: "home" }[app.dataset.snap] || "home");
+      const a = allowed(); return snapTo(curH >= SN[a[a.length - 1]] - 20 ? a[0] : a[a.length - 1]);
+    }
     snapTo(nearest(curH));
   };
   sheet.addEventListener("pointerup", end);
   sheet.addEventListener("pointercancel", end);
 })();
 
-/* 홈 전체화면(바리케이드를 위로 올린 상태): 맨 위에서 아래로 당기면 원래 높이로 돌아가요 */
+/* 홈 시트: 맨 위에서 아래로 당기면 한 단계 내려가요 (전체화면 → 기본 → 아래로 접힘). 접힌 상태에서 위로 밀면 기본 높이로 돌아와요 */
 (function pullDown() {
-  let y0 = null;
-  const full = () => S.cur.view === "home" && app.dataset.snap === "full" && body.scrollTop <= 0;
-  body.addEventListener("touchstart", e => { y0 = e.touches[0].clientY; }, { passive: true });
-  body.addEventListener("touchmove", e => { if (y0 != null && full() && e.touches[0].clientY - y0 > 48) { y0 = null; snapTo("home"); } }, { passive: true });
-  body.addEventListener("wheel", e => { if (full() && e.deltaY < -20) snapTo("home"); }, { passive: true });
+  let x0 = null, y0 = null;
+  const home = () => S.cur.view === "home";
+  const lower = () => { const s = app.dataset.snap; if (s === "full") snapTo("home"); else if (s === "home") snapTo("mini"); };
+  body.addEventListener("touchstart", e => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
+  body.addEventListener("touchmove", e => {
+    if (y0 == null || !home()) return;
+    const dy = e.touches[0].clientY - y0, dx = Math.abs(e.touches[0].clientX - x0);
+    if (dy > 48 && dy > dx && body.scrollTop <= 0 && app.dataset.snap !== "mini") { y0 = null; lower(); }
+    else if (dy < -36 && -dy > dx && app.dataset.snap === "mini") { y0 = null; snapTo("home"); }
+  }, { passive: true });
+  body.addEventListener("wheel", e => {
+    if (!home()) return;
+    if (e.deltaY < -20 && body.scrollTop <= 0) lower();
+    else if (e.deltaY > 20 && app.dataset.snap === "mini") snapTo("home");
+  }, { passive: true });
 })();
 
 /* 키보드가 올라오면 화면 높이를 줄여서 표지판이 키보드 위에 붙게 해요 */
@@ -638,19 +658,6 @@ function fitViewport() {
 }
 if (window.visualViewport) { visualViewport.addEventListener("resize", fitViewport); visualViewport.addEventListener("scroll", fitViewport); }
 window.addEventListener("resize", fitViewport);
-
-/* 내 위치 버튼 */
-const locBtn = document.createElement("button");
-locBtn.className = "locate"; locBtn.setAttribute("aria-label", "내 위치"); locBtn.innerHTML = ico("locate", "");
-app.appendChild(locBtn);
-function placeLocate() { locBtn.style.bottom = `calc(var(--navh) + ${curH + 14}px)`; }
-locBtn.addEventListener("click", () => {
-  if (!navigator.geolocation) return toast("이 기기에서는 위치를 쓸 수 없어요");
-  navigator.geolocation.getCurrentPosition(p => {
-    S.here = { lat: p.coords.latitude, lng: p.coords.longitude }; S.me = S.here; drawMarkers();   // S.me: 검색할 때 서버로 보내 거리 정렬에 써요
-    if (map) { map.setCenter(new kakao.maps.LatLng(S.here.lat, S.here.lng)); map.setLevel(4); }
-  }, () => toast("위치 권한을 허용해 주세요"), { enableHighAccuracy: true, timeout: 8000 });
-});
 
 /* =====================================================================
    지도 (카카오맵)
@@ -720,11 +727,11 @@ async function search(q, pick = null, noTaste = false) {      // pick: 이용자
   S.stack = [{ view: "home" }]; S.cur = { view: "loading", arg: q };
   qEl.value = q; draw(); snapTo("mid");
   try {
-    const r = await fetch("/api/search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: q, ...(pick ? { sort: pick } : {}), ...(A.taste && !A.taste.skipped && !noTaste ? { taste: A.taste.choices } : {}), ...(S.me || {}) }) });
+    const r = await fetch("/api/search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: q, ...(pick ? { sort: pick } : {}), ...(A.taste && !A.taste.skipped && !noTaste ? { taste: A.taste.choices } : {}) }) });
     const j = await r.json().catch(() => ({}));
     if (my !== S.token) return;                         // 그 사이 처음으로/다른 검색을 눌렀으면 무시
     if (!r.ok) throw new Error(j.error || `오류 (${r.status})`);
-    S.results = j.results || []; S.understood = j.understood || []; S.notice = j.notice || ""; S.guide = j.guide || ""; S.sort = j.sort || "recommend";
+    S.results = j.results || []; S.understood = j.understood || []; S.notice = j.notice || ""; S.guide = j.guide || ""; S.suggest = j.suggest || []; S.sort = j.sort || "recommend";
     if (!S.results.length) { drawMarkers(); S.cur = { view: "error", arg: S.guide || S.notice || "조건에 맞는 카페를 찾지 못했어요. 다르게 물어봐 주세요." }; draw(); return; }
     if (!pick && !noTaste) { pushHist(q, S.understood); logSearch(q); }   // 정렬·취향만 바꾼 재검색은 기록에 또 남기지 않아요
     showResults(true);
@@ -824,10 +831,55 @@ async function sendFeedback() {
   }
 }
 
+/* ---------- 👍/👎 의견 (추천 개선용 기록일 뿐, 다음 검색 결과에는 영향을 주지 않아요) ---------- */
+const VM = { id: null, reasons: [], text: "" };
+const vmEl = document.createElement("div"); vmEl.id = "vmodal"; vmEl.hidden = true; app.appendChild(vmEl);
+function refreshVotes() {
+  document.querySelectorAll("[data-vote]").forEach(b => b.classList.toggle("on", S.votes[b.dataset.vid] === b.dataset.vote));
+}
+function postVote(id, vote, reasons = [], text = "") {
+  return fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cafe_id: id, vote, reasons, text, query: S.query || "" }) }).then(r => r.ok).catch(() => false);
+}
+function onVote(id, kind) {
+  if (kind === "up") {
+    if (S.votes[id] === "up") delete S.votes[id];
+    else { S.votes[id] = "up"; postVote(id, "up"); toast("의견 고마워요"); }
+    store.set("votes", S.votes); return refreshVotes();
+  }
+  if (S.votes[id] === "down") { delete S.votes[id]; store.set("votes", S.votes); return refreshVotes(); }   // 다시 누르면 취소
+  Object.assign(VM, { id, reasons: [], text: "" }); drawVM();
+}
+function drawVM() {
+  const c = cafeById(VM.id); if (!c) { vmEl.hidden = true; return; }
+  const keep = vmEl.querySelector("#vmText"); if (keep) VM.text = keep.value;
+  vmEl.hidden = false;
+  vmEl.innerHTML = `<div class="vm-back" data-vclose></div><div class="vm" role="dialog" aria-label="무엇이 달랐나요?">
+    <b class="vm-t">무엇이 달랐나요?</b><p>${esc(c.name)} · 해당하는 걸 모두 골라 주세요</p>
+    <div class="vm-chips">${FIELDS.map(f => `<button type="button" data-vreason="${f.key}" class="${VM.reasons.includes(f.key) ? "on" : ""}">${f.label}</button>`).join("")}</div>
+    ${VM.reasons.includes("etc") ? `<textarea id="vmText" maxlength="300" placeholder="기타 의견을 자유롭게 적어 주세요">${esc(VM.text)}</textarea>` : ""}
+    <button class="go blue" data-vsend>보내기</button><button class="link gray" data-vclose>닫기</button>
+    <p>이 의견은 추천을 더 좋게 만드는 데만 쓰여요. 다음 검색에서 이 카페를 빼지는 않아요.</p></div>`;
+  if (VM.reasons.includes("etc") && !keep) setTimeout(() => { const t = vmEl.querySelector("#vmText"); if (t) t.focus(); }, 50);
+}
+async function sendDown() {
+  const t = vmEl.querySelector("#vmText"), text = t ? t.value.trim() : "", id = VM.id;
+  vmEl.hidden = true;
+  S.votes[id] = "down"; store.set("votes", S.votes); refreshVotes();
+  const ok = await postVote(id, "down", VM.reasons, text);
+  toast(ok ? "알려 주셔서 고마워요" : "의견을 보내지 못했어요. 잠시 후 다시 시도해 주세요");
+}
+
 /* ---------- 이벤트 (위임) ---------- */
 document.addEventListener("click", e => {
   const t = e.target;
   if (t.closest("#sign")) return;                       // 표지판은 아래 전용 처리
+  const vb = t.closest("[data-vote]");
+  if (vb) return onVote(+vb.dataset.vid, vb.dataset.vote);   // 카드 안 버튼이라 카드 열기보다 먼저 처리
+  const vr = t.closest("[data-vreason]");
+  if (vr) { const k = vr.dataset.vreason, i = VM.reasons.indexOf(k); i < 0 ? VM.reasons.push(k) : VM.reasons.splice(i, 1); return drawVM(); }
+  if (t.closest("[data-vsend]")) return sendDown();
+  if (t.closest("[data-vclose]")) { vmEl.hidden = true; return; }
   const open = t.closest("[data-open]");
   if (open) return openDetail(+open.dataset.open);
   const q = t.closest("[data-q]");
