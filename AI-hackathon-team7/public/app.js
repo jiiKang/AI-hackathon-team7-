@@ -1,0 +1,1144 @@
+/* =====================================================================
+   안암 카페 챗 — 화면 로직
+   ★ 디자인이 바뀌면
+     · 색·글자·간격·모양 → styles.css 맨 위 :root 값
+     · 문구·예시·출처·하단 메뉴 → 바로 아래 "설정"
+     · 화면 구조(HTML) → V.* 함수 (화면 1개 = 함수 1개)
+   화면 이름: home(기본) · chat(검색 Tip) · loading/results/error/peek(지도+시트) · detail · feedback · feedback-done · sources · history
+   ===================================================================== */
+
+/* ---------- 설정 ---------- */
+const STATION = { lat: 37.5861, lng: 127.0292, level: 4 };   // 안암역 (지도 시작 위치)
+const TEXT = {
+  addrPlaceholder: "성북구 안암동 5가",
+  footLine: "정보 출처: 카카오맵 · 방문 리뷰(영수증·블로그) · 건축물대장",
+  footMore: "자세히",
+  contact: "",                       // 문의 연락처가 있으면 적으세요 (출처 안내 화면 맨 아래)
+};
+const DATA_UPDATED = "2026-11-14";   // ★ 데이터 마지막 업데이트 날짜
+const PLACEHOLDER = {                // 표지판 입력창 안내 문구 [굵은 글씨, 연한 예시]
+  home:    ["어디로 갈까요?", "ex. 밥 먹고 갈 분위기 좋은 카페 추천해줘"],
+  chat:    ["어디로 갈까요?", "ex. 안암에서 늦게까지 작업할만한 곳"],
+  results: ["다시 물어보기", "ex. 콘센트 많은 조용한 카페"],
+  detail:  ["이 카페에 대해", "ex. 여기 말차라떼도 팔아?"],
+};
+<<<<<<< HEAD
+const EXAMPLES = [                   // 홈에 항상 나오는 추천 키워드 (최근 대화가 생겨도 유지돼요)
+  "분위기 좋은 카페", "지금 영업 중인 카페", "콘센트 많고 작업하기 좋은 카페", "디저트 맛있는 카페", "조용한 카페", "단체로 가기 좋은 넓은 카페",
+];
+const TIP_POOL = ["지금 영업 중", "콘센트", "디저트", "조용한", "늦게까지", "단체", "작업하기 좋은", "분위기 좋은", "프랜차이즈 말고"];   // 검색 Tip 추천에 쓰는 조건
+=======
+const EXAMPLES = [                   // 기록이 없을 때 홈에 나오는 추천 키워드
+  "지금 영업 중인 카페", "콘센트 많고 작업하기 좋은 카페", "디저트 맛있는 카페", "조용한 카페", "단체로 가기 좋은 넓은 카페",
+];
+const TIP_POOL = ["지금 영업 중", "콘센트", "디저트", "조용한", "늦게까지", "단체", "작업하기 좋은"];   // 검색 Tip 추천에 쓰는 조건
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+const FIELDS = [                     // 정보 수정 항목 — key 는 서버(cafe_core.FEEDBACK_FIELDS)와 같아야 해요
+  { key: "hours",   label: "영업시간" },
+  { key: "seating", label: "좌석·콘센트" },
+  { key: "menu",    label: "메뉴" },
+  { key: "mood",    label: "분위기·소음" },
+  { key: "closed",  label: "폐업·이전" },
+  { key: "photo",   label: "사진" },
+  { key: "etc",     label: "기타" },
+];
+const SOURCES = [                    // 데이터·출처 안내 화면
+  ["위치·주소", "카카오맵(카카오 로컬 API)에서 가져왔어요."],
+  ["영업시간·좌석·메뉴·분위기", "영수증 리뷰와 블로그 리뷰에서 추출해 팀이 직접 수집·정리했어요. 실제와 다를 수 있어요."],
+  ["좌석 규모", "건축물대장의 면적으로 추정한 값이라 참고용이에요."],
+  ["신뢰도 A·B·C", "근거가 된 리뷰의 수와 일치 정도에 따른 등급이에요. A가 가장 믿을 만해요."],
+  ["AI 해석", "질문을 검색 조건으로 바꾸고 카페에 대한 질문에 답하는 데만 AI(Gemini)를 써요. 카페 정보는 정리된 데이터에서만 가져오고, 없는 내용은 '확인되지 않았어요'라고 답해요."],
+  ["사진", "사진 아래에 출처를 표시해요. 사진의 저작권은 원 저작자에게 있어요."],
+  ["정보 수정", "틀린 정보는 카페 상세의 '정보가 달라요'로 알려 주세요. 확인 후 반영해요."],
+  ["내 기록", "로그인하지 않으면 최근 대화와 추천은 이 기기(브라우저)에만 저장돼요. Google로 로그인하면 저장한 카페와 검색어가 내 계정에 보관돼요(본인만 볼 수 있어요)."],
+];
+<<<<<<< HEAD
+const NAV = [                        // 하단 메뉴 (아이콘은 ICON 참고). 현재 화면의 아이콘은 채워져요
+  { id: "home",  icon: "home",     label: "홈" },
+  { id: "chat",  icon: "chat",     label: "대화" },
+  { id: "swipe", icon: "swipe",    label: "스와이프" },
+  { id: "saved", icon: "bookmark", label: "저장됨" },
+  { id: "info",  icon: "info",     label: "출처" },
+];
+const NAV_OF = { home: "home", loading: "home", results: "home", error: "home", peek: "home", history: "chat", swipe: "swipe", saved: "saved", sources: "info" };   // 화면 → 켜질 메뉴
+const NAV_HIDDEN = ["chat", "detail", "ask", "feedback", "feedback-done", "taste"];     // 대화 중·장소 상세 등에서는 메뉴를 숨겨요
+const SIGN_OFF = ["detail", "history", "swipe", "saved"];                              // 아래 검색 표지판을 숨기는 화면
+const ASK_PRESETS = ["영업시간이 어떻게 돼요?", "콘센트 있어요?", "대표 메뉴가 뭐예요?", "분위기가 어때요?"];   // '이 카페에 대해' 물어볼 추천 질문
+
+/* ---------- 아이콘 (선 아이콘) ---------- */
+const ICON = {
+  clock: '<circle cx="12" cy="12" r="8.5"/><path class="cut" d="M12 7.5V12l3 2"/>',
+=======
+const NAV = [                        // 하단 둥근 메뉴 (아이콘은 ICON 참고) — act: 눌렀을 때 동작
+  { id: "home",    icon: "home",  label: "홈" },
+  { id: "chat",    icon: "chat",  label: "물어보기" },
+  { id: "saved",   icon: "heart", label: "저장" },
+  { id: "history", icon: "clock", label: "최근 대화" },
+  { id: "info",    icon: "info",  label: "정보 출처" },
+];
+
+/* ---------- 아이콘 (선 아이콘) ---------- */
+const ICON = {
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+  seat:  '<path d="M6 11V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v5M4 11h16v4H4zM6 15v4M18 15v4"/>',
+  cup:   '<path d="M5 8h11v5a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5zM16 9h2a2 2 0 0 1 0 4h-2M8 3v2M12 3v2"/>',
+  mood:  '<circle cx="12" cy="12" r="8.5"/><path d="M8.5 14a4 4 0 0 0 7 0M9 9.5v.5M15 9.5v.5"/>',
+  photo: '<rect x="3.5" y="5.5" width="17" height="13" rx="2"/><circle cx="9" cy="10.5" r="1.6"/><path d="m4 17 5-4 3 2.5 3-3 5 4"/>',
+  check: '<circle cx="12" cy="12" r="9"/><path d="m8 12.5 3 3 5-6"/>',
+  home:  '<path d="M4 11 12 4l8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/>',
+<<<<<<< HEAD
+  chat:  '<path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-4 3v-3H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/><path class="cut" d="M8.5 11h.01M12 11h.01M15.5 11h.01"/>',
+  swipe: '<rect x="5" y="3.5" width="14" height="17" rx="2.5"/><path class="cut" d="M9 12h6M13 9l3 3-3 3"/>',
+  bookmark: '<path d="M7 4.5h10a1 1 0 0 1 1 1V20l-6-4-6 4V5.5a1 1 0 0 1 1-1z"/>',
+  heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.5A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
+  info:  '<circle cx="12" cy="12" r="9"/><path class="cut" d="M12 11v5M12 8v.5"/>',
+=======
+  chat:  '<path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-4 3v-3H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/>',
+  heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.5A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
+  info:  '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.5"/>',
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+  search:'<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4-4"/>',
+  locate:'<circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
+};
+const ico = (n, cls = "ico") => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICON[n] || ""}</svg>`;
+
+/* ---------- 유틸 ---------- */
+const $ = s => document.querySelector(s);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const host = u => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch (e) { return ""; } };
+const safeUrl = u => (/^https?:\/\//i.test(u || "") || /^\//.test(u || "")) ? u : "";
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("anam." + k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem("anam." + k, JSON.stringify(v)); } catch (e) {} },
+};
+
+const app = $("#app"), sheet = $("#sheet"), body = $("#body"), page = $("#page"), pbody = $("#pbody"),
+  sign = $("#sign"), qEl = $("#q"), phEl = $("#ph"), navEl = $("#nav"), toastEl = $("#toast");
+
+/* ---------- 상태 ---------- */
+<<<<<<< HEAD
+const S = { all: [], results: [], understood: [], notice: "", guide: "", query: "", selected: null, token: 0, here: null, sort: null,   // sort: 결과가 실제로 어떤 정렬인지(서버가 알려줌). 주소 검색은 null
+=======
+const S = { all: [], results: [], understood: [], notice: "", query: "", selected: null, token: 0, here: null, sort: null,   // sort: 결과가 실제로 어떤 정렬인지(서버가 알려줌). 주소 검색은 null
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+  cur: { view: "home" }, stack: [], qa: {}, hist: store.get("hist", []) };
+let map = null, overlays = [], hereOverlay = null;
+
+/* ---------- 회원 (Supabase Auth · Google 로그인) ----------
+   키가 없으면(A.sb 없음) 로그인 기능은 숨기고 예전처럼 동작해요. 회원별 데이터는 RLS 로 본인 것만 읽고 써요:
+   user_profile(로그인 시 자동 생성) · user_favorite(저장한 카페) · user_search_log(검색 기록) */
+<<<<<<< HEAD
+const A = { sb: null, user: null, taste: null, tasteAsked: false };   // taste: { choices, skipped } (없으면 null)
+=======
+const A = { sb: null, user: null, favs: new Set(), taste: null, tasteAsked: false };   // taste: { choices, skipped } (없으면 null)
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+const welcome = $("#welcome");
+const cafeKey = c => c && c.src_id;                       // Supabase cafe.id (공공 매장 ID)
+const userName = () => (A.user && ((A.user.user_metadata && (A.user.user_metadata.full_name || A.user.user_metadata.name)) || A.user.email)) || "";
+const acctHtml = () => !A.sb ? "" : A.user
+  ? `<div class="acct"><span><b>${esc(userName())}</b> 님</span><span><button class="link" data-taste>내 취향</button> <button class="link gray" data-logout>로그아웃</button></span></div>`
+  : `<div class="acct"><span>로그인하지 않았어요</span><button class="link" data-login>로그인</button></div>`;
+<<<<<<< HEAD
+=======
+async function loadFavs() {
+  A.favs = new Set();
+  if (!A.user) return;
+  const { data } = await A.sb.from("user_favorite").select("cafe_id");
+  (data || []).forEach(r => A.favs.add(r.cafe_id));
+}
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+async function loadHist() {             // 로그인 계정에 저장된 이전 검색을 기록에 합침
+  if (!A.user) return;
+  const { data } = await A.sb.from("user_search_log").select("query,created_at").order("created_at", { ascending: false }).limit(30);
+  const seen = new Set(S.hist.map(h => h.q));
+  const more = (data || []).filter(r => !seen.has(r.query) && seen.add(r.query)).map(r => ({ q: r.query, und: [], t: Date.parse(r.created_at) }));
+  S.hist = [...S.hist, ...more].sort((a, b) => b.t - a.t).slice(0, 30);
+  store.set("hist", S.hist);
+}
+/* ---------- 취향 분석: 가입 직후 한 번 고르고(건너뛰기 가능), 검색할 때 추천에 반영해요 ----------
+   질문은 실제로 데이터가 있는 항목만 넣었어요(눈치·데이트처럼 데이터가 없는 항목은 데이터가 쌓이면 추가). id 는 서버 cafe_core.TASTE_FLAGS 와 같아야 해요. */
+const TASTE = [
+  { id: "why", title: "카페에 가는 이유", multi: true, opts: [["work", "과제·작업", "💻"], ["study", "스터디·모임", "📚"], ["alone", "혼자 쉬기", "☕"], ["dessert", "디저트", "🍰"]] },
+  { id: "must", title: "꼭 필요한 것", multi: true, opts: [["plug", "콘센트", "🔌"], ["wifi", "와이파이", "📶"], ["group", "단체석", "👥"], ["pet", "반려동물 동반", "🐶"], ["park", "주차", "🚗"]] },
+  { id: "noise", title: "소음 취향", multi: false, opts: [["quiet", "조용한 곳", "🤫"], ["talk", "적당한 대화 소리", "🗣️"]] },
+  { id: "price", title: "아메리카노 가격대", multi: true, opts: [["p1", "3,000원 이하", "🏷️"], ["p2", "3,000~4,500원", "💵"], ["p3", "4,500원 이상", "💎"]] },
+  { id: "pain", title: "가장 불편했던 점", multi: true, opts: [["p_plug", "콘센트 찾기", "🔋"], ["p_noise", "시끄러움", "🔊"], ["p_full", "자리 없음", "💺"]] },
+];
+const TS = { sel: {}, step: "survey", first: false };       // 고르는 중인 값(섹션 → Set), 화면 단계, 가입 직후인지
+const tasteCount = () => TASTE.reduce((n, s) => n + TS.sel[s.id].size, 0);
+async function loadTaste() {
+  A.taste = null;
+  if (!A.user) return;
+  const { data, error } = await A.sb.from("user_taste").select("choices,skipped").maybeSingle();
+  if (error) { A.tasteAsked = true; return; }                // 읽지 못했으면 가입 직후 화면으로 착각해 띄우지 않아요
+  if (data) A.taste = { choices: data.choices || {}, skipped: !!data.skipped };
+}
+function openTaste(first) {
+  const have = (A.taste && A.taste.choices) || {};
+  TS.sel = Object.fromEntries(TASTE.map(s => [s.id, new Set((have[s.id] || []).filter(v => s.opts.some(o => o[0] === v)))]));
+  Object.assign(TS, { step: "survey", first: !!first });
+  go("taste");
+}
+function tasteToggle(b) {
+  const s = TASTE.find(x => x.id === b.dataset.ts), set = TS.sel[s.id], v = b.dataset.tv;
+  if (set.has(v)) set.delete(v); else { if (!s.multi) set.clear(); set.add(v); }
+  document.querySelectorAll(`[data-ts="${s.id}"]`).forEach(x => { const on = set.has(x.dataset.tv); x.classList.toggle("on", on); x.setAttribute("aria-pressed", String(on)); });
+  const n = tasteCount(); $("#tCount").textContent = n ? `${n}개 선택` : "선택해 주세요"; $("[data-tgo]").disabled = !n;
+}
+async function saveTaste(skipped) {
+  const choices = skipped ? {} : Object.fromEntries(TASTE.map(s => [s.id, [...TS.sel[s.id]]]).filter(x => x[1].length));
+  if (A.user) {
+    const { error } = await A.sb.from("user_taste").upsert({ user_id: A.user.id, choices, skipped, updated_at: new Date().toISOString() });
+    if (error) return toast("저장하지 못했어요. 잠시 후 다시 해 주세요");
+  }
+  A.taste = { choices, skipped };
+  toast(skipped ? "나중에 '내 취향'에서 고를 수 있어요" : "취향을 저장했어요. 추천에 반영할게요");
+  goHome();
+}
+async function setUser(u) {
+  A.user = u || null;
+  if (A.user) { if (!welcome.classList.contains("loading")) welcome.hidden = true; } else A.tasteAsked = false;   // 로딩 중이면 startDone 이 시간 맞춰 닫아요
+<<<<<<< HEAD
+  await Promise.all([loadHist(), loadTaste()]);
+  if (A.user && !A.taste && !A.tasteAsked && S.cur.view === "home") { A.tasteAsked = true; return openTaste(true); }   // 가입 직후(저장된 취향 없음) 한 번만
+  if (["home", "history"].includes(S.cur.view)) draw();
+=======
+  await Promise.all([loadFavs(), loadHist(), loadTaste()]);
+  if (A.user && !A.taste && !A.tasteAsked && S.cur.view === "home") { A.tasteAsked = true; return openTaste(true); }   // 가입 직후(저장된 취향 없음) 한 번만
+  if (["home", "saved", "detail"].includes(S.cur.view)) draw();
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+}
+async function googleLogin() {
+  const { error } = await A.sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + location.pathname } });
+  if (error) $("#wErr").textContent = "로그인을 시작하지 못했어요: " + error.message;
+}
+<<<<<<< HEAD
+=======
+async function toggleFav() {
+  const c = cafeById(S.selected);
+  if (!A.user) { welcome.hidden = false; return; }
+  const k = cafeKey(c); if (!k) return;
+  const on = A.favs.has(k);
+  const { error } = on ? await A.sb.from("user_favorite").delete().eq("cafe_id", k) : await A.sb.from("user_favorite").insert({ cafe_id: k });
+  if (error) return toast("저장하지 못했어요");
+  on ? A.favs.delete(k) : A.favs.add(k);
+  const b = $("[data-fav]"); if (b) { b.classList.toggle("on", !on); b.setAttribute("aria-pressed", String(!on)); }
+  toast(on ? "저장을 해제했어요" : "저장했어요");
+}
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+function logSearch(q) {
+  if (!A.user) return;
+  A.sb.from("user_search_log").insert({ query: q.slice(0, 200) }).then(({ error }) => { if (error) console.warn("검색 기록 저장 실패:", error.message); });
+}
+
+/* ---------- 기록·취향 (이 기기에만 저장) ---------- */
+function pushHist(q, und) {
+  S.hist = [{ q, und: und || [], t: Date.now() }, ...S.hist.filter(h => h.q !== q)].slice(0, 30);
+  store.set("hist", S.hist);
+}
+function prefs() {                      // 자주 쓴 조건 순서
+  const n = {};
+  S.hist.forEach(h => (h.und || []).forEach(u => { n[u] = (n[u] || 0) + 1; }));
+  return Object.entries(n).sort((a, b) => b[1] - a[1]).map(x => x[0]);
+}
+function tips() {
+  const out = [], top = prefs()[0];
+  if (top) {
+    const add = TIP_POOL.find(t => !top.includes(t) && !t.includes(top)) || TIP_POOL[0];
+    out.push({ pre: "자주 찾는 ", em: top, post: `에 '${add}'을 더해 보세요`, ex: `${top} ${add} 카페` });
+  }
+  out.push({ pre: "조건을 함께 말하면 정확해요 · ", em: "콘센트 많고 조용한 카페", post: "", ex: "콘센트 많고 조용한 카페" });
+  out.push({ pre: "언제 갈지 알려 주면 영업 중인 곳만 골라요 · ", em: "지금 영업 중인 디저트 카페", post: "", ex: "지금 영업 중인 디저트 카페" });
+<<<<<<< HEAD
+  out.push({ pre: "분위기도 물어보세요 · ", em: "분위기 좋은 개인 카페", post: "", ex: "분위기 좋은 프랜차이즈 아닌 카페" });
+  out.push({ pre: "메뉴 이름도 좋아요 · ", em: "티라미수 있는 카페", post: "", ex: "티라미수 있는 카페" });
+  return out.slice(0, 4);
+}
+const dayHash = (day, id) => { let x = 0; for (const ch of day + id) x = (x * 31 + ch.charCodeAt(0)) >>> 0; return x; };
+const closeHour = c => { const m = ((c.summary || {}).hours || "").match(/[–-]\s*(\d{1,2}):/); return m ? +m[1] : null; };
+function recSets() {                    // 홈 아래 추천 묶음 여러 개 (최근 대화가 생겨도 그대로 유지)
+  const day = new Date().toDateString(), withPhoto = S.all.filter(c => (c.photos || []).length);
+  const shuffle = l => [...l].sort((a, b) => dayHash(day, a.id) % 997 - dayHash(day, b.id) % 997);
+  const keys = prefs().slice(0, 3).flatMap(p => p.split(/\s+/)).filter(w => w.length >= 2);
+  const sets = [];
+  if (keys.length) {
+    const scored = withPhoto.map(c => ({ c, s: keys.reduce((n, k) => n + (Object.values(c.summary || {}).join(" ").includes(k) ? 1 : 0), 0) })).filter(x => x.s).sort((a, b) => b.s - a.s);
+    if (scored.length >= 3) sets.push(["취향에 맞는 카페", scored.slice(0, 8).map(x => x.c)]);
+  }
+  sets.push(["오늘의 카페", shuffle(withPhoto).slice(0, 8)]);
+  sets.push(["분위기 좋은 카페", shuffle(withPhoto.filter(c => (c.vibe || []).length >= 2)).slice(0, 8)]);
+  sets.push(["늦게까지 여는 카페", shuffle(withPhoto.filter(c => { const h = closeHour(c); return h != null && (h >= 22 || h <= 4); })).slice(0, 8)]);
+  sets.push(["프랜차이즈 말고, 개인 카페", shuffle(withPhoto.filter(c => !c.franchise)).slice(0, 8)]);
+  return sets.filter(s => s[1].length >= 2);
+=======
+  out.push({ pre: "메뉴 이름도 좋아요 · ", em: "티라미수 있는 카페", post: "", ex: "티라미수 있는 카페" });
+  return out.slice(0, 4);
+}
+function recommend() {                  // 사진 있는 카페를 취향에 맞춰 (취향이 없으면 날짜별로 섞어서)
+  const keys = prefs().slice(0, 3).flatMap(p => p.split(/\s+/)).filter(w => w.length >= 2);
+  const day = new Date().toDateString();
+  const h = s => { let x = 0; for (const ch of s) x = (x * 31 + ch.charCodeAt(0)) >>> 0; return x; };
+  return S.all.filter(c => (c.photos || []).length).map(c => {
+    const text = Object.values(c.summary || {}).join(" ");
+    return { c, s: keys.reduce((a, k) => a + (text.includes(k) ? 1 : 0), 0) * 1000 + (h(day + c.id) % 997) };
+  }).sort((a, b) => b.s - a.s).slice(0, 8).map(x => x.c);
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+}
+const ago = t => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? "방금" : m < 60 ? `${m}분 전` : m < 1440 ? `${Math.round(m / 60)}시간 전` : `${Math.round(m / 1440)}일 전`; };
+function toast(msg) { toastEl.textContent = msg; toastEl.classList.add("on"); clearTimeout(toast.t); toast.t = setTimeout(() => toastEl.classList.remove("on"), 1800); }
+
+/* =====================================================================
+   화면들 — 각 함수는 HTML 문자열을 돌려줘요. (data-screen = 화면 이름)
+   ===================================================================== */
+const V = {
+  /* 홈 (지도 위 시트): 주소 검색 · 최근 대화 · 추천 카드 */
+  home: () => {
+    const rec = S.hist.slice(0, 6).map(h => h.q), has = rec.length > 0;
+<<<<<<< HEAD
+    return `<div data-screen="home">
+      <form class="addr-search" id="addrForm" role="search">${ico("search")}<input id="addr" type="search" enterkeyhint="search" placeholder="${esc(TEXT.addrPlaceholder)}" aria-label="주소 검색"></form>
+      ${has ? `<div class="sec"><b>최근 대화</b><button class="link" data-history>전체보기</button></div>
+      <div class="rchips">${rec.map(q => `<button class="rchip" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div>` : ""}
+      <div class="sec"><b>이런 건 어때요</b></div>
+      <div class="rchips">${EXAMPLES.map(q => `<button class="rchip" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div>
+      ${recSets().map(([t, l]) => `<div class="sec"><b>${esc(t)}</b></div><div class="swipe">${l.map(V.rcard).join("")}</div>`).join("")}
+=======
+    const photos = recommend();
+    return `<div data-screen="home">
+      <form class="addr-search" id="addrForm" role="search">${ico("search")}<input id="addr" type="search" enterkeyhint="search" placeholder="${esc(TEXT.addrPlaceholder)}" aria-label="주소 검색"></form>
+      <div class="sec"><b>${has ? "최근 대화" : "이런 건 어때요"}</b>${has ? '<button class="link" data-history>전체보기</button>' : ""}</div>
+      <div class="rchips">${(has ? rec : EXAMPLES).map(q => `<button class="rchip" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div>
+      ${photos.length ? `<div class="sec"><b>${has ? "취향에 맞는 카페" : "오늘의 카페"}</b></div>
+      <div class="swipe">${photos.map(V.rcard).join("")}</div>` : ""}
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+      <div class="sheetfoot"><span>${esc(TEXT.footLine)}</span><button type="button" data-sources>${esc(TEXT.footMore)}</button></div>
+    </div>`;
+  },
+  rcard: c => {
+    const p = c.photos[0];
+    return `<div class="rcard" data-open="${c.id}">
+      <img src="${esc(safeUrl(p.url))}" alt="" loading="lazy" referrerpolicy="no-referrer">
+      <div class="shade"></div>
+      <span class="src">${p.source ? "사진 출처: " + esc(host(p.source)) : esc(p.credit)}</span>
+      <div class="cap"><b>${esc(c.name)}</b><span>${[c.open_now === true ? "영업 중" : c.open_now === false ? "영업 종료" : "", (c.summary || {}).atmosphere || (c.summary || {}).hours || ""].filter(Boolean).map(esc).join(" · ")}</span></div>
+    </div>`;
+  },
+
+  /* 채팅: 검색 Tip (표지판이 아래로 내려온 상태) */
+  chat: () => `<div class="page" data-screen="chat">
+    <div class="toprow"><button class="back" data-home>← 처음으로</button></div>
+    <div class="tipbox">
+      <h2>검색 Tip.</h2><p class="sub">이렇게 물어보면 더 정확해요</p>
+      <ul class="tips">${tips().map((t, i) => `<li><button type="button" data-tip="${i}">${esc(t.pre)}<em>${esc(t.em)}</em>${esc(t.post)}</button></li>`).join("")}</ul>
+    </div>
+  </div>`,
+
+  /* 검색 중 */
+  loading: q => `<div data-screen="loading">
+    <div class="rhead"><div class="rtitle"><b>“<span class="q">${esc(q)}</span>” 찾는 중…</b></div></div>
+    <div class="cards"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
+  </div>`,
+
+  /* 결과 목록 */
+  results: () => `<div data-screen="results">
+    <div class="rhead">
+      <div class="rtitle"><b>“<span class="q">${esc(S.query)}</span>”</b><button class="link gray" data-home>처음으로</button></div>
+      ${S.understood.length ? `<div class="und">이렇게 이해했어요 ${S.understood.map(u => `<span class="c">${esc(u)}</span>`).join("")}</div>` : ""}
+      ${S.sort ? `<div class="sortbar"><button type="button" data-sort="recommend"${S.sort === "recommend" ? ' class="on"' : ""}>추천순</button><button type="button" data-sort="distance"${S.sort === "distance" ? ' class="on"' : ""}>거리순</button><span class="hint">거리는 ${S.me ? "내 위치" : "고려대 정문"} 기준</span></div>` : ""}
+<<<<<<< HEAD
+      ${S.guide ? `<p class="guide">${esc(S.guide).replace(/\n/g, "<br>")}</p>` : ""}
+=======
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+      ${S.notice ? `<span class="notice">${esc(S.notice)}</span>` : ""}
+      ${S.sort && A.taste && !A.taste.skipped && Object.keys(A.taste.choices || {}).length ? `<button type="button" class="link gray" data-notaste>${S.noTaste ? "내 취향 다시 적용하기" : "이번엔 내 취향 빼고 찾기"}</button>` : ""}
+    </div>
+    <ol class="cards">${S.results.map(V.card).join("")}</ol>
+    <div class="sheetfoot"><span>${esc(TEXT.footLine)}</span><button type="button" data-sources>${esc(TEXT.footMore)}</button></div>
+  </div>`,
+  card: c => {
+    const chips = (c.matched || []).slice(0, 3);
+    const reason = c.reason && c.reason !== chips.join(" · ") && c.reason !== chips.join(", ") ? c.reason : "";
+    const ph = (c.photos || [])[0];
+    return `<li class="card" data-open="${c.id}">
+      <span class="rank">${c.rank || ""}</span>
+      <div class="cmain">
+        <div class="cname">${esc(c.name)}</div>
+        <div class="meta">${V.badge(c)}${V.info(c)}${c.dist_m != null ? `<span class="dist">${fmtM(c.dist_m)}</span>` : ""}${c.summary && c.summary.hours ? `<span>${esc(c.summary.hours)}</span>` : ""}</div>
+        ${reason ? `<div class="reason">${esc(reason)}</div>` : ""}
+        ${chips.length ? `<div class="kw">${chips.map(k => `<span>${esc(k)}</span>`).join("")}</div>` : ""}
+      </div>
+      ${ph ? `<div class="thumb"><img src="${esc(safeUrl(ph.url))}" alt="" loading="lazy" referrerpolicy="no-referrer"></div>` : ""}
+    </li>`;
+  },
+  info: c => c.info ? `<span class="badge lv ${{ "확인됨": "ok", "일부 추정": "mid", "정보 부족": "low" }[c.info] || ""}" title="질문한 조건의 정보가 얼마나 확실한지">${esc(c.info)}</span>` : "",   // 서버가 정한 정보 수준
+<<<<<<< HEAD
+  badge: c => (c.open_now === true ? '<span class="badge open">영업 중</span>' : c.open_now === false ? '<span class="badge closed">영업 종료</span>' : "")
+    + (c.franchise ? '<span class="badge fr">프랜차이즈</span>' : ""),
+=======
+  badge: c => c.open_now === true ? '<span class="badge open">영업 중</span>' : c.open_now === false ? '<span class="badge closed">영업 종료</span>' : "",
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+
+  /* 결과 없음 / 오류 */
+  error: msg => `<div data-screen="error">
+    <div class="rhead"><div class="rtitle"><b>검색 결과</b><button class="link gray" data-home>처음으로</button></div></div>
+    <div class="empty">${esc(msg)}</div>
+  </div>`,
+
+  /* 지도에서 선택한 카페 미리보기 (시트 아래쪽에 작게) */
+  peek: id => {
+    const c = cafeById(id); if (!c) return "";
+    const q = encodeURIComponent(c.name);
+    const nav = c.lat != null ? `https://map.kakao.com/link/to/${q},${c.lat},${c.lng}` : `https://map.kakao.com/link/search/${q}`;
+    return `<div class="peek" data-screen="peek">
+      <div class="cname">${esc(c.name)} ${V.badge(c)}</div>
+      <div class="meta">${c.summary && c.summary.hours ? `<span>${esc(c.summary.hours)}</span>` : ""}</div>
+      <div class="btns"><button class="go blue" data-open="${c.id}">상세 보기</button><a class="btn2" href="${esc(nav)}" target="_blank" rel="noopener">길찾기</a></div>
+      <div style="text-align:center;margin-top:10px"><button class="link gray" data-back>${S.results.length ? "← 후보 목록" : "← 처음으로"}</button></div>
+    </div>`;
+  },
+
+  /* 카페 상세: 이름 / 간단한 정보 / 사진(옆으로 스와이프) */
+  detail: id => {
+    const c = cafeById(id); if (!c) return V.error("카페를 찾을 수 없어요");
+    const s = c.summary || {}, n = c.notes || {};
+    const row = (icon, label, v) => `<div class="row">${ico(icon)}<b>${label}</b><span class="${v ? "" : "none"}">${esc(v || "정보 없음")}</span></div>`;
+    const more = [["영업시간", n.hours], ["좌석", n.seating]].filter(x => x[1]);
+    const q = encodeURIComponent(c.name);
+    const nav = c.lat != null ? `https://map.kakao.com/link/to/${q},${c.lat},${c.lng}` : `https://map.kakao.com/link/search/${q}`;
+    return `<div class="page detail" data-screen="detail">
+      <div class="toprow"><button class="back" data-back>${S.results.length ? "← 후보 목록" : "← 뒤로"}</button><button class="link" data-showmap>지도에서 보기</button></div>
+<<<<<<< HEAD
+      <div class="dname"><div class="dtxt"><h2>${esc(c.name)} ${V.badge(c)}</h2>${c.address ? `<p class="addr">${esc(c.address)}</p>` : ""}</div><button type="button" class="askbtn" data-ask>AI에게 묻기</button></div>
+      <div class="info">
+        ${n.mood ? `<p class="summary">${esc(n.mood.length > 110 ? n.mood.slice(0, 108) + "…" : n.mood)}</p>` : ""}
+        <div class="rows">${row("cup", "구분", c.franchise ? "프랜차이즈" : "개인 카페")}${row("clock", "시간", s.hours)}${row("seat", "좌석", s.seating)}${row("cup", "메뉴", s.menu)}${row("mood", "분위기", s.atmosphere)}</div>
+=======
+      <div class="dname"><div class="dtxt"><h2>${esc(c.name)} ${V.badge(c)}</h2>${c.address ? `<p class="addr">${esc(c.address)}</p>` : ""}</div>${A.sb ? V.heart(c) : ""}</div>
+      <div class="info">
+        ${n.mood ? `<p class="summary">${esc(n.mood.length > 110 ? n.mood.slice(0, 108) + "…" : n.mood)}</p>` : ""}
+        <div class="rows">${row("clock", "시간", s.hours)}${row("seat", "좌석", s.seating)}${row("cup", "메뉴", s.menu)}${row("mood", "분위기", s.atmosphere)}</div>
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+        ${more.length ? `<details class="more"><summary>자세히</summary>${more.map(m => `<p><b>${m[0]}</b> ${esc(m[1])}</p>`).join("")}</details>` : ""}
+        ${c.basis ? `<div class="basis">근거: ${esc(c.basis)}</div>` : ""}
+      </div>
+      ${V.photos(c)}
+<<<<<<< HEAD
+=======
+      <div class="qa" id="qa">${V.qa(c.id)}</div>
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+      <div class="actions">
+        <a class="go blue" href="${esc(nav)}" target="_blank" rel="noopener">카카오맵에서 길찾기</a>
+        <button class="btn2" data-feedback>정보가 달라요</button>
+      </div>
+      <div class="foot"><span>${esc(TEXT.footLine)}</span><button type="button" data-sources>${esc(TEXT.footMore)}</button></div>
+    </div>`;
+  },
+<<<<<<< HEAD
+=======
+  heart: c => `<button class="heart${A.favs.has(cafeKey(c)) ? " on" : ""}" data-fav aria-label="저장" aria-pressed="${A.favs.has(cafeKey(c))}">${ico("heart", "")}</button>`,
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+  photos: c => {
+    const ps = c.photos || [];
+    if (!ps.length) return `<div class="photos"><figure class="photo"><div class="ph empty">${ico("photo")}사진 준비 중</div></figure></div>`;
+    return `<div class="photos" id="photos">${ps.map(p => {
+      const cap = p.source ? `출처: <a href="${esc(p.source)}" target="_blank" rel="noopener">${esc(host(p.source) || "원문")} ↗</a>` : esc(p.credit || "");
+      return `<figure class="photo"><div class="ph"><img src="${esc(safeUrl(p.url))}" alt="${esc(c.name)} 사진" loading="lazy" referrerpolicy="no-referrer"></div><figcaption>${cap}</figcaption></figure>`;
+    }).join("")}</div>${ps.length > 1 ? `<div class="dots" id="dots">${ps.map((_, i) => `<i class="${i ? "" : "on"}"></i>`).join("")}</div>` : ""}`;
+  },
+  qa: id => {
+    const l = S.qa[id] || [];
+    return l.length ? `<h3>이 카페에 물어본 내용</h3>` + l.map(x => `<div class="bubble q">${esc(x.q)}</div><div class="bubble a${x.a == null ? " wait" : ""}">${x.a == null ? "찾는 중…" : esc(x.a)}</div>`).join("") : "";
+  },
+
+<<<<<<< HEAD
+  /* 장소에 대해 AI에게 묻기: 이 카페 정보만 가지고 답해요 (아래 표지판으로 질문) */
+  ask: id => {
+    const c = cafeById(id); if (!c) return V.error("카페를 찾을 수 없어요");
+    return `<div class="page" data-screen="ask">
+      <div class="toprow"><button class="back" data-back>← ${esc(c.name)}</button></div>
+      <h2 class="pagetitle">${esc(c.name)}<br><span class="blue">에 대해 물어보세요</span></h2>
+      <p class="lead">이 카페의 정리된 정보만 보고 답해요. 없는 내용은 '확인되지 않았어요'라고 답해요.</p>
+      <div class="rchips wrap">${ASK_PRESETS.map(q => `<button class="rchip" data-askq="${esc(q)}">${esc(q)}</button>`).join("")}</div>
+      <div class="qa" id="qa">${V.qa(c.id)}</div>
+    </div>`;
+  },
+
+  /* 스와이프: 카드로 카페 요약을 보고 왼쪽(싫어요)/오른쪽(좋아요)으로 밀어요. MVP 라서 동작은 모션만 있고 저장·학습은 아직 없어요 */
+  swipe: () => `<div class="page swipepage" data-screen="swipe">
+    <div class="toprow"><h2 class="pagetitle">스와이프</h2></div>
+    <p class="lead">왼쪽으로 밀면 싫어요, 오른쪽으로 밀면 좋아요</p>
+    <div class="deck" id="deck">${V.deck()}</div>
+    <div class="swbtns"><button type="button" class="swb no" data-sw="L" aria-label="싫어요">✕</button><button type="button" class="swb yes" data-sw="R" aria-label="좋아요">${ico("heart", "")}</button></div>
+  </div>`,
+  deck: () => {
+    const left = SW.deck.slice(SW.i, SW.i + 3);
+    if (!left.length) return `<div class="deckend"><b>오늘 카드는 다 봤어요</b><p>다시 보면 처음부터 보여드려요</p><button class="go blue" data-swreset>다시 보기</button></div>`;
+    return left.map((c, d) => ({ c, d })).reverse().map(({ c, d }) => {
+      const s = c.summary || {}, p = (c.photos || [])[0];
+      return `<div class="scard${d ? "" : " top"}" style="--d:${d}" data-sid="${c.id}">
+        ${p ? `<img src="${esc(safeUrl(p.url))}" alt="" draggable="false" referrerpolicy="no-referrer">` : ""}
+        <div class="shade"></div>
+        <span class="stamp yes">좋아요</span><span class="stamp no">싫어요</span>
+        <div class="scap"><div class="sbadges">${V.badge(c)}</div><b>${esc(c.name)}</b>
+          <ul>${[["시간", s.hours], ["좌석", s.seating], ["분위기", s.atmosphere]].filter(x => x[1]).map(x => `<li><i>${x[0]}</i>${esc(x[1])}</li>`).join("")}</ul></div>
+      </div>`;
+    }).join("");
+  },
+
+=======
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+  /* 정보 수정 제안 */
+  feedback: st => {
+    const c = cafeById(S.selected);
+    return `<div class="page" data-screen="feedback">
+      <div class="toprow"><button class="back" data-back>← 돌아가기</button></div>
+      <h2 class="pagetitle">${esc(c ? c.name : "")}</h2>
+      <p class="lead">틀린 정보를 알려 주시면 확인 후 고칠게요.</p>
+      <div class="seg" id="fbField">${FIELDS.map(f => `<button type="button" data-field="${f.key}" class="${st.field === f.key ? "on" : ""}">${f.label}</button>`).join("")}</div>
+      <label class="field2">어떻게 달라요?<textarea id="fbValue" maxlength="500" placeholder="예: 일요일은 12시에 열어요">${esc(st.value || "")}</textarea></label>
+      <label class="field2">참고 링크 (선택)<input id="fbUrl" type="url" inputmode="url" placeholder="https://" value="${esc(st.url || "")}"></label>
+      <p class="err" id="fbErr">${esc(st.err || "")}</p>
+      <button class="go blue" id="fbSend">보내기</button>
+      <p class="fine">보낸 내용은 확인 후 반영돼요. 개인정보는 적지 마세요.</p>
+    </div>`;
+  },
+  "feedback-done": () => `<div class="page" data-screen="feedback-done">
+    <div class="done">${ico("check")}<h2 class="pagetitle" style="margin-top:10px">알려 주셔서 고마워요</h2><p class="lead">확인 후 반영할게요.</p></div>
+    <div class="actions"><button class="go blue" data-back>카페로 돌아가기</button><button class="btn2" data-home>처음으로</button></div>
+  </div>`,
+
+  /* 데이터·정보 출처 안내 */
+  sources: () => `<div class="page" data-screen="sources">
+    <div class="toprow"><button class="back" data-back>← 돌아가기</button></div>
+    <h2 class="pagetitle">데이터·정보 출처</h2>
+    <div class="src">${SOURCES.map(s => `<div><h3>${esc(s[0])}</h3><p>${esc(s[1])}</p></div>`).join("")}</div>
+    <p class="fine">마지막 업데이트 ${esc(DATA_UPDATED)}${TEXT.contact ? ` · 문의 ${esc(TEXT.contact)}` : ""}</p>
+  </div>`,
+
+  /* 취향 분석 (가입 직후 · 내 취향) */
+  taste: () => {
+    if (TS.step === "result") {
+      const pick = (id, f) => [...TS.sel[id]].map(v => { const o = TASTE.find(s => s.id === id).opts.find(x => x[0] === v); return `<span>${o[2]} ${esc(f ? f(o[1]) : o[1])}</span>`; }).join("");
+      const must = pick("must"), prefer = pick("why") + pick("noise") + pick("price", t => "아메리카노 " + t), pain = pick("pain");
+      const block = (t, h, cls) => h ? `<section class="tsec"><h3>${t}</h3><div class="ttags ${cls}">${h}</div></section>` : "";
+      return `<div class="page" data-screen="taste">
+        <div class="toprow"><span></span></div>
+        <h2 class="pagetitle">이런 기준으로<br>찾아드릴게요</h2>
+        <p class="lead">검색할 때마다 이 기준이 같이 반영돼요. 질문에 직접 쓴 조건도 그대로 지켜요.</p>
+        ${block("꼭 필요한 조건", must, "must")}${block("가능하면 맞는 곳", prefer, "")}${block("불편했던 점은 더 신경 써요", pain, "")}
+        <p class="fine">“꼭 필요”는 없다고 확인된 카페만 빼요. 정보가 아직 없는 카페는 그대로 보여주고 점수만 달라져요.</p>
+        <div class="tbar"><button class="btn2" data-tredo>다시 고르기</button><button class="go blue" data-tsave>이 기준으로 찾기</button></div>
+      </div>`;
+    }
+    const n = tasteCount();
+    return `<div class="page" data-screen="taste">
+      <div class="toprow"><span></span>${TS.first ? '<button class="link gray" data-tskip>건너뛰기</button>' : '<button class="link gray" data-back>닫기</button>'}</div>
+      <h2 class="pagetitle">당신의 카페 취향,<br>먼저 찾아볼까요?</h2>
+      <p class="lead">고른 만큼 추천이 정확해져요. 아직 모르겠으면 넘어가도 돼요.</p>
+      ${TASTE.map(s => `<section class="tsec"><h3>${esc(s.title)}<small>${s.multi ? "복수 선택" : "하나만"}</small></h3><div class="seg" role="group">${s.opts.map(o => {
+        const on = TS.sel[s.id].has(o[0]); return `<button type="button" data-ts="${s.id}" data-tv="${o[0]}" aria-pressed="${on}" class="${on ? "on" : ""}">${o[2]} ${esc(o[1])}</button>`; }).join("")}</div></section>`).join("")}
+      <div class="tbar"><span class="tcount" id="tCount">${n ? `${n}개 선택` : "선택해 주세요"}</span><button class="go blue" data-tgo${n ? "" : " disabled"}>내 기준 보기</button></div>
+    </div>`;
+  },
+
+<<<<<<< HEAD
+  /* 저장됨: MVP 에서는 준비 중 */
+  saved: () => `<div class="page" data-screen="saved">
+    <div class="toprow"><h2 class="pagetitle">저장됨</h2></div>
+    <div class="soon">${ico("bookmark")}<b>준비 중이에요</b><p>마음에 든 카페를 모아 보는 기능을 만들고 있어요.</p></div>
+  </div>`,
+
+  /* 최근 대화 전체보기 */
+  history: () => `<div class="page" data-screen="history">
+    <div class="toprow"><h2 class="pagetitle">최근 대화</h2><button class="newchat" data-newchat>＋ 새 대화</button></div>
+    ${acctHtml()}
+    ${S.hist.length ? `<ul class="hist">${S.hist.map(h => `<li><button data-q="${esc(h.q)}">${esc(h.q)}<small>${ago(h.t)}${h.und && h.und.length ? " · " + h.und.map(esc).join(" · ") : ""}</small></button></li>`).join("")}</ul><button class="link gray clr" data-clear>기록 지우기</button>`
+      : '<p class="lead">아직 대화 기록이 없어요. 오른쪽 위 \'새 대화\'를 눌러 물어보세요.</p>'}
+  </div>`,
+};
+const MODE = { home: "home", loading: "map", results: "map", error: "map", peek: "map", chat: "page", detail: "page", ask: "page", history: "page", saved: "page", swipe: "page",
+  feedback: "plain", "feedback-done": "plain", sources: "plain", taste: "plain" };
+const SW = { deck: [], i: 0, seed: "" };           // 스와이프 카드 묶음과 현재 위치
+=======
+  /* 저장한 카페 (로그인 필요) */
+  saved: () => {
+    const list = S.all.filter(c => A.favs.has(cafeKey(c)));
+    return `<div class="page" data-screen="saved">
+      <div class="toprow"><button class="back" data-back>← 돌아가기</button></div>
+      <h2 class="pagetitle">저장한 카페</h2>
+      ${acctHtml()}
+      ${!A.sb ? '<p class="lead">로그인 기능을 쓸 수 없는 환경이에요.</p>'
+        : !A.user ? '<p class="lead">로그인하면 마음에 든 카페를 저장해 둘 수 있어요.</p><button class="go blue" data-login>Google로 로그인</button>'
+        : list.length ? `<ol class="cards">${list.map(V.card).join("")}</ol>`
+        : '<p class="lead">아직 저장한 카페가 없어요. 카페 상세에서 ♡ 저장하기를 눌러 보세요.</p>'}
+    </div>`;
+  },
+
+  /* 최근 대화 전체보기 */
+  history: () => `<div class="page" data-screen="history">
+    <div class="toprow"><button class="back" data-back>← 돌아가기</button>${S.hist.length ? '<button class="link gray" data-clear>기록 지우기</button>' : ""}</div>
+    <h2 class="pagetitle">최근 대화</h2>
+    ${S.hist.length ? `<ul class="hist">${S.hist.map(h => `<li><button data-q="${esc(h.q)}">${esc(h.q)}<small>${ago(h.t)}${h.und && h.und.length ? " · " + h.und.map(esc).join(" · ") : ""}</small></button></li>`).join("")}</ul>`
+      : '<p class="lead">아직 대화 기록이 없어요. 아래 표지판에 물어보세요.</p>'}
+  </div>`,
+};
+const MODE = { home: "home", loading: "map", results: "map", error: "map", peek: "map", chat: "page", detail: "page", history: "page", saved: "page",
+  feedback: "plain", "feedback-done": "plain", sources: "plain", taste: "plain" };
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+const cafeById = id => S.results.find(r => r.id === id) || S.all.find(r => r.id === id);
+
+/* ---------- 화면 그리기 / 이동 ---------- */
+function setPh() {
+<<<<<<< HEAD
+  const v = S.cur.view, key = v === "home" ? "home" : v === "chat" ? "chat" : (v === "detail" || v === "ask") ? "detail" : "results";
+=======
+  const v = S.cur.view, key = v === "home" ? "home" : v === "chat" ? "chat" : v === "detail" ? "detail" : "results";
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+  const [b, t] = PLACEHOLDER[key];
+  phEl.innerHTML = `<b>${esc(b)}</b><span>${esc(t)}</span>`;
+  sign.classList.toggle("has-value", !!qEl.value);
+}
+function draw() {
+  const { view, arg } = S.cur, mode = MODE[view];
+  app.dataset.mode = mode;
+<<<<<<< HEAD
+  app.dataset.menu = NAV_HIDDEN.includes(view) ? "0" : "1";          // 메뉴: 대화·장소 상세에서만 숨김
+  app.dataset.sign = SIGN_OFF.includes(view) ? "off" : "on";
+  navEl.querySelectorAll("button").forEach(b => { const on = b.dataset.nav === NAV_OF[view]; b.classList.toggle("on", on); b.setAttribute("aria-current", on ? "page" : "false"); });
+=======
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+  const inPage = mode === "page" || mode === "plain";
+  page.hidden = !inPage;
+  const html = V[view](arg);
+  if (inPage) { pbody.innerHTML = html; pbody.scrollTop = 0; } else { body.innerHTML = html; body.scrollTop = 0; sheet.dataset.view = view; }
+  qEl.readOnly = view === "home";
+  setPh();
+<<<<<<< HEAD
+  setH(curH, false);                   // 메뉴가 나타나거나 사라지면 시트·버튼 높이를 다시 맞춰요
+  ensureSentinel();
+}
+function newChat() {                    // 최근 대화 화면의 '새 대화': 검색 Tip 화면 + 키보드
+  S.stack = [{ view: "home" }]; S.cur = { view: "chat" };
+  qEl.value = ""; draw(); qEl.focus();
+}
+function navTo(id) {                    // 하단 메뉴로 이동: 쌓인 화면을 비우고 해당 화면으로
+  if (id === "home") return goHome();
+  const view = { chat: "history", swipe: "swipe", saved: "saved", info: "sources" }[id];
+  if (!view) return;
+  S.token++;
+  if (view === "swipe") { const pool = S.all.filter(c => (c.photos || []).length), day = new Date().toDateString();
+    SW.deck = pool.sort((x, y) => dayHash(day + SW.seed, x.id) % 9973 - dayHash(day + SW.seed, y.id) % 9973).slice(0, 20); SW.i = 0; }
+  Object.assign(S, { results: [], understood: [], notice: "", guide: "", query: "", selected: null, here: null, sort: null, stack: [{ view: "home" }], cur: { view } });
+  qEl.value = ""; qEl.blur(); drawMarkers(); draw();
+}
+function swipeEnd(dir, card) {          // 카드를 밀어 보내는 모션 (결과 저장·학습은 없음)
+  if (!card || card.dataset.out) return;
+  card.dataset.out = "1";
+  card.classList.add("fly"); card.style.transform = `translate(${dir * 520}px, 40px) rotate(${dir * 28}deg)`; card.style.opacity = "0";
+  setTimeout(() => { SW.i++; const d = $("#deck"); if (d) d.innerHTML = V.deck(); }, 260);
+}
+(function swipeDrag() {
+  let d = null;
+  document.addEventListener("pointerdown", e => {
+    const c = e.target.closest(".scard.top"); if (!c) return;
+    d = { c, x: e.clientX, y: e.clientY, dx: 0, moved: false };
+    try { c.setPointerCapture(e.pointerId); } catch (_) {}
+    c.classList.remove("fly"); c.style.transition = "none";
+  });
+  document.addEventListener("pointermove", e => {
+    if (!d) return;
+    d.dx = e.clientX - d.x; const dy = e.clientY - d.y;
+    if (Math.abs(d.dx) > 6 || Math.abs(dy) > 6) d.moved = true;
+    d.c.style.transform = `translate(${d.dx}px, ${dy * 0.35}px) rotate(${d.dx / 18}deg)`;
+    d.c.style.setProperty("--yes", Math.max(0, Math.min(1, d.dx / 90)));
+    d.c.style.setProperty("--no", Math.max(0, Math.min(1, -d.dx / 90)));
+  });
+  const up = () => {
+    if (!d) return; const { c, dx, moved } = d; d = null;
+    c.style.transition = "";
+    if (Math.abs(dx) > 90) return swipeEnd(dx > 0 ? 1 : -1, c);
+    c.style.transform = ""; c.style.setProperty("--yes", 0); c.style.setProperty("--no", 0);
+    if (!moved) openDetail(+c.dataset.sid);
+  };
+  document.addEventListener("pointerup", up);
+  document.addEventListener("pointercancel", up);
+})();
+=======
+  placeLocate();
+  ensureSentinel();
+}
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+function go(view, arg) {                // 새 화면으로 (뒤로 가기용으로 지금 화면을 쌓아 둠)
+  S.stack.push(S.cur);
+  S.cur = { view, arg };
+  draw();
+}
+function back() {
+  const p = S.stack.pop();
+  if (!p) return goHome();
+  S.cur = p;
+  if (p.view === "home" || p.view === "results") { S.selected = null; drawMarkers(); }
+  draw();
+  if (p.view === "home") snapTo("home"); else if (p.view === "results") { snapTo("mid"); } else if (p.view === "peek") snapTo("peek");
+  if (p.view === "results" || p.view === "home") { qEl.value = p.view === "results" ? S.query : ""; setPh(); }
+}
+/* 폰의 뒤로 가기(제스처·버튼)로도 한 단계씩 돌아가게 해요 */
+let sentinel = false;
+function ensureSentinel() { if (!sentinel && S.cur.view !== "home") { try { history.pushState({ a: 1 }, ""); sentinel = true; } catch (e) {} } }
+window.addEventListener("popstate", () => {
+  sentinel = false;
+  if (S.cur.view !== "home") { back(); ensureSentinel(); }
+});
+
+function goHome() {                     // 처음 화면 (검색 결과·선택·입력 모두 비움)
+  S.token++;
+<<<<<<< HEAD
+  Object.assign(S, { results: [], understood: [], notice: "", guide: "", query: "", selected: null, here: null, sort: null, stack: [], cur: { view: "home" } });
+=======
+  Object.assign(S, { results: [], understood: [], notice: "", query: "", selected: null, here: null, sort: null, stack: [], cur: { view: "home" } });
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+  qEl.value = ""; qEl.blur();
+  drawMarkers(); resetMap();
+  draw(); snapTo("home");
+}
+function openChat() {                   // 표지판을 눌렀을 때: 표지판이 아래로 내려오고 키보드가 올라와요
+  if (S.cur.view !== "home") return;
+  go("chat");
+  qEl.value = ""; setPh();
+  qEl.focus();
+}
+function showResults(fit) {
+  S.selected = null;
+  S.cur = { view: "results" };
+  drawMarkers(); draw(); snapTo("mid");
+  qEl.value = S.query; setPh();
+  if (fit) fitResults();
+}
+function openDetail(id) {
+  S.selected = id; drawMarkers();
+  qEl.value = ""; qEl.blur();
+  go("detail", id);
+}
+function openPeek(id) {                 // 지도에서 핀을 눌렀을 때
+  const c = cafeById(id); if (!c) return;
+  S.selected = id; drawMarkers();
+  if (S.cur.view === "peek") S.cur = { view: "peek", arg: id }; else { S.stack.push(S.cur); S.cur = { view: "peek", arg: id }; }
+  qEl.value = ""; draw(); snapTo("peek");
+  setTimeout(() => focusOn(c), 320);
+}
+function showOnMap() {                  // 상세 → 지도에서 보기
+  const id = S.selected, c = cafeById(id); if (!c) return;
+  S.cur = { view: "peek", arg: id };
+  draw(); snapTo("peek"); setTimeout(() => focusOn(c), 320);
+}
+
+/* =====================================================================
+   바텀시트 높이·드래그
+   ===================================================================== */
+const H = () => app.clientHeight || window.innerHeight;
+<<<<<<< HEAD
+const navH = () => app.dataset.menu === "1" ? navEl.offsetHeight : 0;       // 하단 메뉴 높이 (숨겨졌으면 0)
+=======
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+const SN = {
+  get peek() { return 320; },
+  get home() { return Math.round(Math.min(H() * 0.44, 420)); },
+  get mid() { return Math.round(H() * 0.56); },
+<<<<<<< HEAD
+  get full() { return Math.round(H() - navH() - 22); },
+=======
+  get full() { return Math.round(H() - 64); },
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+};
+let curH = 0;
+function allowed() { const v = S.cur.view; return v === "home" ? ["home", "full"] : v === "peek" ? ["peek", "mid"] : ["peek", "mid", "full"]; }
+function setH(h, animate = true) {
+  curH = Math.max(SN.peek - 60, Math.min(SN.full, h));
+  sheet.classList.toggle("dragging", !animate);
+  sheet.style.height = curH + "px";
+  placeLocate();
+}
+function snapTo(k) { app.dataset.snap = k; setH(SN[k]); }
+function nearest(h) { return allowed().map(k => [k, SN[k]]).sort((a, b) => Math.abs(a[1] - h) - Math.abs(b[1] - h))[0][0]; }
+(function drag() {
+  let startY = 0, startH = 0, moved = false, on = false;
+  sheet.addEventListener("pointerdown", e => {
+    if (!e.target.closest("[data-drag]")) return;
+    on = true; moved = false; startY = e.clientY; startH = curH;
+    try { sheet.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  sheet.addEventListener("pointermove", e => {
+    if (!on) return;
+    const dy = startY - e.clientY;
+    if (Math.abs(dy) > 4) moved = true;
+    if (moved) setH(startH + dy, false);
+  });
+  const end = () => {
+    if (!on) return; on = false;
+    sheet.classList.remove("dragging");
+    if (!moved) { const a = allowed(); return snapTo(curH >= SN[a[a.length - 1]] - 20 ? a[0] : a[a.length - 1]); }
+    snapTo(nearest(curH));
+  };
+  sheet.addEventListener("pointerup", end);
+  sheet.addEventListener("pointercancel", end);
+})();
+
+<<<<<<< HEAD
+/* 홈 전체화면(바리케이드를 위로 올린 상태): 맨 위에서 아래로 당기면 원래 높이로 돌아가요 */
+(function pullDown() {
+  let y0 = null;
+  const full = () => S.cur.view === "home" && app.dataset.snap === "full" && body.scrollTop <= 0;
+  body.addEventListener("touchstart", e => { y0 = e.touches[0].clientY; }, { passive: true });
+  body.addEventListener("touchmove", e => { if (y0 != null && full() && e.touches[0].clientY - y0 > 48) { y0 = null; snapTo("home"); } }, { passive: true });
+  body.addEventListener("wheel", e => { if (full() && e.deltaY < -20) snapTo("home"); }, { passive: true });
+})();
+
+=======
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+/* 키보드가 올라오면 화면 높이를 줄여서 표지판이 키보드 위에 붙게 해요 */
+function fitViewport() {
+  const vv = window.visualViewport;
+  app.style.setProperty("--vvh", (vv ? vv.height : window.innerHeight) + "px");
+  if (vv && vv.offsetTop) window.scrollTo(0, 0);
+  setH(curH, false);
+}
+if (window.visualViewport) { visualViewport.addEventListener("resize", fitViewport); visualViewport.addEventListener("scroll", fitViewport); }
+window.addEventListener("resize", fitViewport);
+
+/* 내 위치 버튼 */
+const locBtn = document.createElement("button");
+locBtn.className = "locate"; locBtn.setAttribute("aria-label", "내 위치"); locBtn.innerHTML = ico("locate", "");
+app.appendChild(locBtn);
+<<<<<<< HEAD
+function placeLocate() { locBtn.style.bottom = `calc(var(--navh) + ${curH + 14}px)`; }
+=======
+function placeLocate() { locBtn.style.bottom = (curH + 14) + "px"; }
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+locBtn.addEventListener("click", () => {
+  if (!navigator.geolocation) return toast("이 기기에서는 위치를 쓸 수 없어요");
+  navigator.geolocation.getCurrentPosition(p => {
+    S.here = { lat: p.coords.latitude, lng: p.coords.longitude }; S.me = S.here; drawMarkers();   // S.me: 검색할 때 서버로 보내 거리 정렬에 써요
+    if (map) { map.setCenter(new kakao.maps.LatLng(S.here.lat, S.here.lng)); map.setLevel(4); }
+  }, () => toast("위치 권한을 허용해 주세요"), { enableHighAccuracy: true, timeout: 8000 });
+});
+
+/* =====================================================================
+   지도 (카카오맵)
+   ===================================================================== */
+function loadKakao(key) {
+  return new Promise((ok, no) => {
+    if (!key) return no(new Error("KAKAO_JS_KEY 가 비어 있어요. .env 에 카카오 JavaScript 키를 넣어 주세요."));
+    const s = document.createElement("script");
+    s.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(key)}&autoload=false&libraries=services`;
+    s.onload = () => kakao.maps.load(ok);
+    s.onerror = () => no(new Error("카카오맵을 불러오지 못했어요. 키·사이트 도메인 등록·인터넷을 확인해 주세요."));
+    document.head.appendChild(s);
+  });
+}
+function markerEl(c, mode) {            // mode: dot(후보 아님) / pin(후보 번호) / sel(선택)
+  const d = document.createElement("div");
+  d.className = "mk";
+  d.innerHTML = mode === "dot" ? '<div class="dot" style="left:-7px;top:-7px"></div>'
+    : mode === "sel" ? `<div class="pin sel" style="left:-19px;top:-47px">${c.rank || ""}</div>`
+    : `<div class="pin" style="left:-15px;top:-15px">${c.rank || ""}</div>`;
+  d.addEventListener("click", ev => { ev.stopPropagation(); openPeek(c.id); });
+  return d;
+}
+function drawMarkers() {
+  if (!map) return;
+  overlays.forEach(o => o.setMap(null)); overlays = [];
+  if (hereOverlay) { hereOverlay.setMap(null); hereOverlay = null; }
+  const ranked = new Map(S.results.map(r => [r.id, r]));
+  const add = (c, mode) => {
+    if (c.lat == null || c.lng == null) return;
+    overlays.push(new kakao.maps.CustomOverlay({ map, position: new kakao.maps.LatLng(c.lat, c.lng), content: markerEl(c, mode), yAnchor: 0, zIndex: mode === "dot" ? 1 : 3 }));
+  };
+  for (const c of S.all) if (!ranked.has(c.id) && c.id !== S.selected) add(c, "dot");
+  for (const r of S.results) add(r, S.selected === r.id ? "sel" : "pin");
+  if (S.selected != null && !ranked.has(S.selected)) { const c = S.all.find(x => x.id === S.selected); if (c) add(c, "sel"); }
+  if (S.here) { const e = document.createElement("div"); e.className = "mk"; e.innerHTML = '<div class="here" style="left:-8px;top:-8px"></div>';
+    hereOverlay = new kakao.maps.CustomOverlay({ map, position: new kakao.maps.LatLng(S.here.lat, S.here.lng), content: e, yAnchor: 0, zIndex: 2 }); }
+}
+function fitResults() {
+  if (!map) return;
+  const pts = S.results.filter(r => r.lat != null);
+  if (!pts.length) return;
+  const b = new kakao.maps.LatLngBounds();
+  pts.forEach(p => b.extend(new kakao.maps.LatLng(p.lat, p.lng)));
+  if (S.here) b.extend(new kakao.maps.LatLng(S.here.lat, S.here.lng));
+  map.setBounds(b, 70, 40, Math.round(SN.mid) + 20, 40);
+}
+function focusOn(c) {
+  if (!map || c.lat == null) return;
+  map.setCenter(new kakao.maps.LatLng(c.lat, c.lng));
+  map.panBy(0, Math.round(curH * 0.4));    // 핀이 시트에 가리지 않게 위로
+}
+function resetMap() {
+  if (!map) return;
+  map.setLevel(STATION.level);
+  map.setCenter(new kakao.maps.LatLng(STATION.lat, STATION.lng));
+}
+
+/* =====================================================================
+   동작: 검색 · 주소 검색 · 질문 · 정보 수정
+   ===================================================================== */
+async function search(q, pick = null, noTaste = false) {      // pick: 이용자가 정렬 버튼으로 고른 값("recommend" | "distance"), noTaste: 이번만 취향 빼고. 새 검색이면 둘 다 기본값
+  q = (q || "").trim();
+  if (!q) return;
+  const my = ++S.token;
+  S.query = q; S.selected = null; S.here = null; S.pick = pick; S.noTaste = noTaste; qEl.blur();
+  S.stack = [{ view: "home" }]; S.cur = { view: "loading", arg: q };
+  qEl.value = q; draw(); snapTo("mid");
+  try {
+    const r = await fetch("/api/search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: q, ...(pick ? { sort: pick } : {}), ...(A.taste && !A.taste.skipped && !noTaste ? { taste: A.taste.choices } : {}), ...(S.me || {}) }) });
+    const j = await r.json().catch(() => ({}));
+    if (my !== S.token) return;                         // 그 사이 처음으로/다른 검색을 눌렀으면 무시
+    if (!r.ok) throw new Error(j.error || `오류 (${r.status})`);
+<<<<<<< HEAD
+    S.results = j.results || []; S.understood = j.understood || []; S.notice = j.notice || ""; S.guide = j.guide || ""; S.sort = j.sort || "recommend";
+    if (!S.results.length) { drawMarkers(); S.cur = { view: "error", arg: S.guide || S.notice || "조건에 맞는 카페를 찾지 못했어요. 다르게 물어봐 주세요." }; draw(); return; }
+=======
+    S.results = j.results || []; S.understood = j.understood || []; S.notice = j.notice || ""; S.sort = j.sort || "recommend";
+    if (!S.results.length) { drawMarkers(); S.cur = { view: "error", arg: S.notice || "조건에 맞는 카페를 찾지 못했어요. 다르게 물어봐 주세요." }; draw(); return; }
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+    if (!pick && !noTaste) { pushHist(q, S.understood); logSearch(q); }   // 정렬·취향만 바꾼 재검색은 기록에 또 남기지 않아요
+    showResults(true);
+  } catch (e) {
+    if (my !== S.token) return;
+    S.results = []; drawMarkers();
+    S.cur = { view: "error", arg: e.message || "검색에 실패했어요. 잠시 후 다시 시도해 주세요." }; draw();
+  }
+}
+
+const rad = d => d * Math.PI / 180;
+const meters = (a, b, c, d) => { const x = rad(c - a), y = rad(d - b), h = Math.sin(x / 2) ** 2 + Math.cos(rad(a)) * Math.cos(rad(c)) * Math.sin(y / 2) ** 2; return 12742000 * Math.asin(Math.sqrt(h)); };
+const fmtM = m => m < 1000 ? `${Math.round(m / 10) * 10}m` : `${(m / 1000).toFixed(1)}km`;
+function geocode(text) {                // 카카오 주소 → 키워드 순서로 좌표 찾기 (없으면 null)
+  return new Promise(ok => {
+    const sv = window.kakao && kakao.maps && kakao.maps.services;
+    if (!sv) return ok(null);
+    const pick = r => r && r[0] ? ok({ lat: +r[0].y, lng: +r[0].x }) : null;
+    try {
+      new sv.Geocoder().addressSearch(text, (r, st) => {
+        if (st === sv.Status.OK && pick(r) !== null) return;
+        new sv.Places().keywordSearch(text.includes("안암") || text.includes("성북") ? text : "안암 " + text, (r2, st2) => { if (st2 === sv.Status.OK && r2 && r2[0]) ok({ lat: +r2[0].y, lng: +r2[0].x }); else ok(null); });
+      });
+    } catch (e) { ok(null); }
+  });
+}
+async function searchAddress(text) {    // 홈 아래 검색창: 주소로 찾기 → 그 주변 카페 5곳
+  text = (text || "").trim();
+  if (!text) return;
+  const my = ++S.token;
+  S.query = text; S.selected = null; S.sort = null; S.stack = [{ view: "home" }]; S.cur = { view: "loading", arg: text };
+  qEl.value = ""; draw(); snapTo("mid");
+  const pt = await geocode(text);
+  if (my !== S.token) return;
+  let list = [];
+  if (pt) {
+    S.here = pt;
+    list = S.all.filter(c => c.lat != null && c.open_now !== false)     // 지금 영업이 끝난 곳은 빼요
+      .map(c => ({ ...c, _d: meters(pt.lat, pt.lng, c.lat, c.lng) })).sort((a, b) => a._d - b._d).slice(0, 5)
+      .map((c, i) => ({ ...c, rank: i + 1, matched: [fmtM(c._d)], reason: "" }));
+  } else {                              // 지도 검색을 못 쓰면 우리 카페 주소·이름에서 글자 찾기
+    S.here = null;
+    list = S.all.filter(c => (c.address + " " + c.name).replace(/\s/g, "").includes(text.replace(/\s/g, ""))).slice(0, 5).map((c, i) => ({ ...c, rank: i + 1, matched: ["주소 일치"], reason: "" }));
+  }
+  S.results = list; S.understood = [`📍 ${text}`]; S.notice = "";
+  if (!list.length) { drawMarkers(); S.cur = { view: "error", arg: "그 주소 근처에서 카페를 찾지 못했어요. 예: 안암로 25, 안암동 5가" }; draw(); return; }
+  S.query = `${text} 근처`;
+  showResults(true);
+}
+
+async function ask(q) {                 // 카페 상세에서 이어서 질문
+  const id = S.selected, list = (S.qa[id] = S.qa[id] || []), item = { q, a: null };
+  list.push(item); qEl.value = ""; setPh(); renderQA();
+  try {
+    const r = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cafe_id: id, question: q }) });
+    const j = await r.json().catch(() => ({}));
+    item.a = r.ok ? j.answer : (j.error || `오류 (${r.status})`);
+  } catch (e) { item.a = "답을 가져오지 못했어요. 잠시 후 다시 물어봐 주세요."; }
+  renderQA();
+}
+function renderQA() {
+  const el = $("#qa");
+<<<<<<< HEAD
+  if (!el || S.cur.view !== "ask") return;
+=======
+  if (!el || S.cur.view !== "detail") return;
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+  el.innerHTML = V.qa(S.selected);
+  const last = el.lastElementChild; if (last) last.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+const FB = { field: "", value: "", url: "", err: "" };
+function openFeedback() {
+  Object.assign(FB, { field: "", value: "", url: "", err: "" });
+  go("feedback", FB);
+}
+/* 정보 수정 제보를 DB 에 저장 (로그인 필요). 같은 카페·항목은 내 제보 1건을 덮어써요. 실패해도 제보 자체(서버 전송)는 이미 됐으니 화면은 막지 않아요. */
+async function saveReport(f) {
+  const k = cafeKey(cafeById(S.selected));
+  if (!A.user || !k) return;
+  const { error } = await A.sb.from("attr_report").upsert(
+    { cafe_id: k, field: f.field, reported_value: f.value || "(내용 없음)", note: f.url || null, user_id: A.user.id },
+    { onConflict: "cafe_id,field,user_id" });
+  if (error) console.warn("제보 DB 저장 실패:", error.message);
+}
+async function sendFeedback() {
+  const err = $("#fbErr"), btn = $("#fbSend");
+  FB.value = $("#fbValue").value.trim(); FB.url = $("#fbUrl").value.trim();
+  if (!FB.field) { err.textContent = "어떤 정보인지 골라 주세요."; return; }
+  if (!FB.value) { err.textContent = "어떻게 다른지 적어 주세요."; return; }
+  btn.disabled = true; err.textContent = "";
+  try {
+    const r = await fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cafe_id: S.selected, field: FB.field, value: FB.value, url: FB.url }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `오류 (${r.status})`);
+    await saveReport(FB);                                // 로그인했으면 내 계정 DB(attr_report)에도 저장
+    S.cur = { view: "feedback-done" }; draw();          // 완료 화면에서 '돌아가기'는 상세로 (쌓인 화면 그대로)
+  } catch (e) {
+    btn.disabled = false; err.textContent = e.message || "보내지 못했어요. 잠시 후 다시 시도해 주세요.";
+  }
+}
+
+/* ---------- 이벤트 (위임) ---------- */
+document.addEventListener("click", e => {
+  const t = e.target;
+  if (t.closest("#sign")) return;                       // 표지판은 아래 전용 처리
+  const open = t.closest("[data-open]");
+  if (open) return openDetail(+open.dataset.open);
+  const q = t.closest("[data-q]");
+  if (q) return search(q.dataset.q);
+  const tip = t.closest("[data-tip]");
+  if (tip) { qEl.value = tips()[+tip.dataset.tip].ex; setPh(); return qEl.focus(); }
+  const ts = t.closest("[data-ts]");
+  if (ts) return tasteToggle(ts);
+  if (t.closest("[data-tgo]")) { TS.step = "result"; return draw(); }
+  if (t.closest("[data-tredo]")) { TS.step = "survey"; return draw(); }
+  if (t.closest("[data-tsave]")) return saveTaste(false);
+  if (t.closest("[data-tskip]")) return saveTaste(true);
+  if (t.closest("[data-taste]")) return openTaste(false);
+  if (t.closest("[data-login]")) { welcome.hidden = false; return; }
+  if (t.closest("[data-logout]")) { A.sb.auth.signOut(); return; }
+<<<<<<< HEAD
+=======
+  if (t.closest("[data-fav]")) return toggleFav();
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+  const so = t.closest("[data-sort]");
+  if (so) return search(S.query, so.dataset.sort, S.noTaste);     // 같은 질문을 고른 정렬로 다시
+  if (t.closest("[data-notaste]")) return search(S.query, S.pick, !S.noTaste);   // 이번만 취향 끄기/켜기
+  if (t.closest("[data-home]")) return goHome();
+  if (t.closest("[data-back]")) return back();
+  if (t.closest("[data-showmap]")) return showOnMap();
+  if (t.closest("[data-history]")) return go("history");
+  if (t.closest("[data-clear]")) {
+    S.hist = []; store.set("hist", []);
+    if (A.user) A.sb.from("user_search_log").delete().eq("user_id", A.user.id).then(() => {});
+    return draw();
+  }
+  if (t.closest("[data-feedback]")) return openFeedback();
+  if (t.closest("[data-sources]")) return go("sources");
+  const f = t.closest("[data-field]");
+  if (f) { FB.field = f.dataset.field; document.querySelectorAll("#fbField button").forEach(b => b.classList.toggle("on", b === f)); return; }
+  if (t.closest("#fbSend")) return sendFeedback();
+  const nv = t.closest("[data-nav]");
+<<<<<<< HEAD
+  if (nv) return navTo(nv.dataset.nav);
+  if (t.closest("[data-newchat]")) return newChat();
+  if (t.closest("[data-ask]")) { go("ask", S.selected); return qEl.focus(); }
+  const aq = t.closest("[data-askq]");
+  if (aq) return ask(aq.dataset.askq);
+  const sw = t.closest("[data-sw]");
+  if (sw) return swipeEnd(sw.dataset.sw === "R" ? 1 : -1, document.querySelector(".scard.top"));
+  if (t.closest("[data-swreset]")) { SW.i = 0; $("#deck").innerHTML = V.deck(); return; }
+=======
+  if (nv) {
+    const id = nv.dataset.nav;
+    if (id === "home") return goHome();
+    if (id === "chat") return openChat();
+    if (id === "saved") return go("saved");
+    if (id === "history") return go("history");
+    if (id === "info") return go("sources");
+  }
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+});
+document.addEventListener("submit", e => {
+  if (e.target.id === "addrForm") { e.preventDefault(); const v = $("#addr").value; $("#addr").blur(); searchAddress(v); }
+});
+sign.addEventListener("click", e => { if (S.cur.view === "home") { e.preventDefault(); openChat(); } });
+sign.addEventListener("submit", e => {
+  e.preventDefault();
+  const v = qEl.value.trim(), view = S.cur.view;
+  if (view === "home") return openChat();
+  if (!v) return;
+<<<<<<< HEAD
+  if (view === "ask") return ask(v);
+=======
+  if (view === "detail") return ask(v);
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+  search(v);
+});
+qEl.addEventListener("input", () => sign.classList.toggle("has-value", !!qEl.value));
+
+/* 사진 로드 실패 → 그 사진만 숨김/대체 (캡처 단계에서 이미지 error 를 잡아요) */
+document.addEventListener("error", e => {
+  const t = e.target;
+  if (!t || t.tagName !== "IMG") return;
+  const box = t.closest(".thumb, .ph, .rcard");
+  if (!box) return;
+  box.classList.add("broken");
+  if (box.classList.contains("ph")) { t.remove(); box.insertAdjacentHTML("afterbegin", `${ico("photo")}사진을 불러오지 못했어요`); }
+}, true);
+
+/* 사진 스와이프 → 아래 점 표시 */
+document.addEventListener("scroll", e => {
+  const t = e.target;
+  if (!t || t.id !== "photos") return;
+  const dots = $("#dots"); if (!dots) return;
+  const i = Math.round(t.scrollLeft / (t.firstElementChild.offsetWidth + 10));
+  [...dots.children].forEach((d, k) => d.classList.toggle("on", k === i));
+}, true);
+
+/* ---------- 시작 ---------- */
+<<<<<<< HEAD
+navEl.innerHTML = NAV.map(n => `<button type="button" data-nav="${n.id}" aria-label="${esc(n.label)}">${ico(n.icon, "")}<span>${esc(n.label)}</span></button>`).join("");
+SW.seed = String(Date.now() % 1000);
+=======
+navEl.innerHTML = NAV.map(n => `<button type="button" data-nav="${n.id}" aria-label="${esc(n.label)}">${ico(n.icon, "")}</button>`).join("");
+>>>>>>> eb23925fa95eb252dfb932ff9a3d142495752b21
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+/* 시작 화면 로딩 끝: 로그인돼 있거나 둘러보기를 골랐거나 로그인 기능이 없으면 바로 메인으로, 아니면 로그인 버튼을 보여줘요 */
+const SPLASH_MS = 1500;     // 로딩이 아무리 빨라도 페이지가 열린 뒤 이 시간까지는 시작 화면을 보여줘요
+function startDone() {
+  setTimeout(() => {
+    welcome.classList.remove("loading");
+    welcome.hidden = !!(A.user || !A.sb || sessionStorage.getItem("guest"));
+  }, Math.max(0, SPLASH_MS - performance.now()));       // performance.now() = 페이지가 열린 뒤 지난 ms
+}
+(async function init() {
+  fitViewport();
+  draw(); setH(SN.home, false); app.dataset.snap = "home";
+  try {
+    const [cfg, cafes] = await Promise.all([fetch("/api/config").then(r => r.json()), fetch("/api/cafes").then(r => r.json())]);
+    S.all = cafes.cafes || [];
+    if (cfg.supabaseUrl && cfg.supabaseKey && window.supabase) {
+      A.sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey);
+      A.sb.auth.onAuthStateChange((_e, session) => { setTimeout(() => setUser(session && session.user), 0); });   // 콜백 안에서 바로 DB 호출하면 멈출 수 있어 한 박자 뒤에
+      const { data } = await A.sb.auth.getSession();
+      await setUser(data.session && data.session.user);
+      $("#gLogin").addEventListener("click", googleLogin);
+      $("#guest").addEventListener("click", () => { sessionStorage.setItem("guest", "1"); welcome.hidden = true; });
+    }
+    if (S.cur.view === "home") draw();                  // 데이터가 오면 추천 카드를 채워요
+    startDone();
+    await loadKakao(cfg.kakaoKey);
+    map = new kakao.maps.Map($("#map"), { center: new kakao.maps.LatLng(STATION.lat, STATION.lng), level: STATION.level });
+    drawMarkers();
+  } catch (e) {
+    startDone();
+    $("#map").innerHTML = `<div class="mapmsg">${esc(e.message)}</div>`;
+  }
+})();

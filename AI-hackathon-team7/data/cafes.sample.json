@@ -1,0 +1,464 @@
+[
+  {
+    "id": 1,
+    "name": "샘플카페 A",
+    "address": "(샘플) 서울 성북구 안암동",
+    "lat": 37.5873,
+    "lng": 127.0271,
+    "hours": {
+      "open": "09:00",
+      "close": "23:00",
+      "closed_days": [
+        "일"
+      ],
+      "note": ""
+    },
+    "seating": {
+      "tables": [
+        {
+          "type": "1인 바석",
+          "count": 6
+        },
+        {
+          "type": "4인 테이블",
+          "count": 5
+        }
+      ],
+      "total_seats": 28,
+      "size": "중형",
+      "outlets": "많음",
+      "outlet_note": ""
+    },
+    "menu": {
+      "desserts": [
+        "티라미수",
+        "스콘"
+      ],
+      "drinks": [
+        "아메리카노",
+        "라떼",
+        "에이드"
+      ]
+    },
+    "atmosphere": {
+      "noise": "조용",
+      "tags": [
+        "우드톤",
+        "아늑함"
+      ],
+      "note": ""
+    }
+  },
+  {
+    "id": 2,
+    "name": "샘플카페 B",
+    "address": "(샘플) 서울 성북구 안암동",
+    "lat": 37.5845,
+    "lng": 127.031,
+    "hours": {
+      "open": "10:00",
+      "close": "22:00",
+      "closed_days": [],
+      "note": ""
+    },
+    "seating": {
+      "tables": [
+        {
+          "type": "2인 테이블",
+          "count": 8
+        },
+        {
+          "type": "6인 테이블",
+          "count": 2
+        }
+      ],
+      "total_seats": 36,
+      "size": "대형",
+      "outlets": "보통",
+      "outlet_note": ""
+    },
+    "menu": {
+      "desserts": [
+        "케이크",
+        "마카롱",
+        "쿠키",
+        "타르트"
+      ],
+      "drinks": [
+        "커피",
+        "차",
+        "스무디"
+      ]
+    },
+    "atmosphere": {
+      "noise": "활기",
+      "tags": [
+        "밝음"
+      ],
+      "note": ""
+    }
+  },
+  {
+    "id": 3,
+    "name": "샘플카페 C",
+    "address": "(샘플) 서울 성북구 안암동",
+    "lat": 37.5885,
+    "lng": 127.0322,
+    "hours": {
+      "open": "08:00",
+      "close": "18:00",
+      "closed_days": [
+        "월"
+      ],
+      "note": ""
+    },
+    "seating": {
+      "tables": [
+        {
+          "type": "2인 테이블",
+          "count": 4
+        }
+      ],
+      "total_seats": 12,
+      "size": "소형",
+      "outlets": "없음",
+      "outlet_note": ""
+    },
+    "menu": {
+      "desserts": [
+        "크루아상"
+      ],
+      "drinks": [
+        "핸드드립",
+        "라떼"
+      ]
+    },
+    "atmosphere": {
+      "noise": "조용",
+      "tags": [
+        "감성",
+        "좌식 없음"
+      ],
+      "note": ""
+    }
+  },
+  {
+    "id": 4,
+    "name": "샘플카페 D",
+    "address": "(샘플) 서울 성북구 안암동",
+    "lat": 37.5852,
+    "lng": 127.0259,
+    "hours": {
+      "open": "11:00",
+      "close": "24:00",
+      "closed_days": [],
+      "note": ""
+    },
+    "seating": {
+      "tables": [
+        {
+          "type": "1인석",
+          "count": 4
+        },
+        {
+          "type": "4인 테이블",
+          "count": 6
+        }
+      ],
+      "total_seats": 30,
+      "size": "중형",
+      "outlets": "많음",
+      "outlet_note": ""
+    },
+    "menu": {
+      "desserts": [
+        "파르페",
+        "와플"
+      ],
+      "drinks": [
+        "커피",
+        "에이드"
+      ]
+    },
+    "atmosphere": {
+      "noise": "보통",
+      "tags": [
+        "넓은 창"
+      ],
+      "note": ""
+    }
+  },
+  {
+    "id": 5,
+    "name": "샘플카페 E",
+    "address": "(샘플) 서울 성북구 안암동",
+    "lat": 37.5892,
+    "lng": 127.028,
+    "hours": {
+      "open": "09:30",
+      "close": "21:00",
+      "closed_days": [
+        "화"
+      ],
+      "note": ""
+    },
+    "seating": {
+      "tables": [
+        {
+          "type": "4인 테이블",
+          "count": 3
+        },
+        {
+          "type": "소파석",
+          "count": 2
+        }
+      ],
+      "total_seats": 18,
+      "size": "소형",
+      "outlets": "적음",
+      "outlet_note": ""
+    },
+    "menu": {
+      "desserts": [
+        "스콘",
+        "까눌레"
+      ],
+      "drinks": [
+        "차",
+        "라떼"
+      ]
+    },
+    "atmosphere": {
+      "noise": "조용",
+      "tags": [
+        "책 많음"
+      ],
+      "note": ""
+    }
+  },
+  {
+    "id": 6,
+    "name": "샘플카페 F",
+    "address": "(샘플) 서울 성북구 안암동",
+    "lat": 37.5831,
+    "lng": 127.0286,
+    "hours": {
+      "open": "12:00",
+      "close": "02:00",
+      "closed_days": [],
+      "note": ""
+    },
+    "seating": {
+      "tables": [
+        {
+          "type": "2인 테이블",
+          "count": 6
+        },
+        {
+          "type": "바석",
+          "count": 5
+        }
+      ],
+      "total_seats": 24,
+      "size": "중형",
+      "outlets": "보통",
+      "outlet_note": ""
+    },
+    "menu": {
+      "desserts": [
+        "브라우니"
+      ],
+      "drinks": [
+        "커피",
+        "하이볼 없음"
+      ]
+    },
+    "atmosphere": {
+      "noise": "활기",
+      "tags": [
+        "늦은 밤 분위기"
+      ],
+      "note": ""
+    }
+  },
+  {
+    "id": 7,
+    "name": "샘플카페 G",
+    "address": "(샘플) 서울 성북구 안암동",
+    "lat": 37.5867,
+    "lng": 127.0333,
+    "hours": {
+      "open": "07:30",
+      "close": "20:00",
+      "closed_days": [],
+      "note": ""
+    },
+    "seating": {
+      "tables": [
+        {
+          "type": "6인 테이블",
+          "count": 4
+        },
+        {
+          "type": "4인 테이블",
+          "count": 4
+        }
+      ],
+      "total_seats": 40,
+      "size": "대형",
+      "outlets": "많음",
+      "outlet_note": ""
+    },
+    "menu": {
+      "desserts": [
+        "베이글",
+        "샌드위치"
+      ],
+      "drinks": [
+        "아메리카노",
+        "라떼"
+      ]
+    },
+    "atmosphere": {
+      "noise": "보통",
+      "tags": [
+        "스터디 모임 많음"
+      ],
+      "note": ""
+    }
+  },
+  {
+    "id": 8,
+    "name": "샘플카페 H",
+    "address": "(샘플) 서울 성북구 안암동",
+    "lat": 37.5838,
+    "lng": 127.0331,
+    "hours": {
+      "open": "10:00",
+      "close": "22:00",
+      "closed_days": [
+        "수"
+      ],
+      "note": ""
+    },
+    "seating": {
+      "tables": [
+        {
+          "type": "1인 테이블",
+          "count": 10
+        }
+      ],
+      "total_seats": 10,
+      "size": "소형",
+      "outlets": "많음",
+      "outlet_note": ""
+    },
+    "menu": {
+      "desserts": [
+        "쿠키"
+      ],
+      "drinks": [
+        "커피"
+      ]
+    },
+    "atmosphere": {
+      "noise": "조용",
+      "tags": [
+        "독서실 분위기"
+      ],
+      "note": ""
+    }
+  },
+  {
+    "id": 9,
+    "name": "샘플카페 I",
+    "address": "(샘플) 서울 성북구 안암동",
+    "lat": 37.588,
+    "lng": 127.0252,
+    "hours": {
+      "open": "10:00",
+      "close": "23:00",
+      "closed_days": [],
+      "note": ""
+    },
+    "seating": {
+      "tables": [
+        {
+          "type": "2인 테이블",
+          "count": 5
+        }
+      ],
+      "total_seats": 14,
+      "size": "소형",
+      "outlets": "없음",
+      "outlet_note": ""
+    },
+    "menu": {
+      "desserts": [
+        "케이크",
+        "타르트",
+        "푸딩",
+        "마들렌",
+        "휘낭시에"
+      ],
+      "drinks": [
+        "차",
+        "에이드"
+      ]
+    },
+    "atmosphere": {
+      "noise": "보통",
+      "tags": [
+        "디저트 전문"
+      ],
+      "note": ""
+    }
+  },
+  {
+    "id": 10,
+    "name": "샘플카페 J",
+    "address": "(샘플) 서울 성북구 안암동",
+    "lat": 37.5855,
+    "lng": 127.0295,
+    "hours": {
+      "open": "09:00",
+      "close": "22:30",
+      "closed_days": [],
+      "note": ""
+    },
+    "seating": {
+      "tables": [
+        {
+          "type": "4인 테이블",
+          "count": 6
+        },
+        {
+          "type": "2인 테이블",
+          "count": 3
+        }
+      ],
+      "total_seats": 30,
+      "size": "중형",
+      "outlets": "보통",
+      "outlet_note": ""
+    },
+    "menu": {
+      "desserts": [
+        "케이크",
+        "스콘"
+      ],
+      "drinks": [
+        "커피",
+        "라떼",
+        "차"
+      ]
+    },
+    "atmosphere": {
+      "noise": "보통",
+      "tags": [
+        "무난함"
+      ],
+      "note": ""
+    }
+  }
+]
