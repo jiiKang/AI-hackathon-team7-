@@ -99,13 +99,19 @@ let map = null, overlays = [], hereOverlay = null;
 /* ---------- 회원 (Supabase Auth · Google 로그인) ----------
    키가 없으면(A.sb 없음) 로그인 기능은 숨기고 예전처럼 동작해요. 회원별 데이터는 RLS 로 본인 것만 읽고 써요:
    user_profile(로그인 시 자동 생성) · user_favorite(저장한 카페) · user_search_log(검색 기록) */
-const A = { sb: null, user: null, taste: null, tasteAsked: false };   // taste: { choices, skipped } (없으면 null)
+const A = { sb: null, user: null, favs: new Set(), taste: null, tasteAsked: false };   // favs: 저장한 카페의 src_id 모음, taste: { choices, skipped } (없으면 null)
 const welcome = $("#welcome");
 const cafeKey = c => c && c.src_id;                       // Supabase cafe.id (공공 매장 ID)
 const userName = () => (A.user && ((A.user.user_metadata && (A.user.user_metadata.full_name || A.user.user_metadata.name)) || A.user.email)) || "";
 const acctHtml = () => !A.sb ? "" : A.user
   ? `<div class="acct"><span><b>${esc(userName())}</b> 님</span><span><button class="link" data-taste>내 취향</button> <button class="link gray" data-logout>로그아웃</button></span></div>`
   : `<div class="acct"><span>로그인하지 않았어요</span><button class="link" data-login>로그인</button></div>`;
+async function loadFavs() {             // 로그인 계정에 저장한 카페 목록
+  A.favs = new Set();
+  if (!A.user) return;
+  const { data } = await A.sb.from("user_favorite").select("cafe_id");
+  (data || []).forEach(r => A.favs.add(r.cafe_id));
+}
 async function loadHist() {             // 로그인 계정에 저장된 이전 검색을 기록에 합침
   if (!A.user) return;
   const { data } = await A.sb.from("user_search_log").select("query,created_at").order("created_at", { ascending: false }).limit(30);
@@ -157,9 +163,20 @@ async function saveTaste(skipped) {
 async function setUser(u) {
   A.user = u || null;
   if (A.user) { if (!welcome.classList.contains("loading")) welcome.hidden = true; } else A.tasteAsked = false;   // 로딩 중이면 startDone 이 시간 맞춰 닫아요
-  await Promise.all([loadHist(), loadTaste()]);
+  await Promise.all([loadFavs(), loadHist(), loadTaste()]);
   if (A.user && !A.taste && !A.tasteAsked && S.cur.view === "home") { A.tasteAsked = true; return openTaste(true); }   // 가입 직후(저장된 취향 없음) 한 번만
-  if (["home", "history"].includes(S.cur.view)) draw();
+  if (["home", "history", "saved", "detail"].includes(S.cur.view)) draw();     // 저장 상태가 바뀌었을 수 있는 화면
+}
+async function toggleFav() {            // 카페 상세의 '저장' 버튼
+  const c = cafeById(S.selected), k = cafeKey(c);
+  if (!k) return;
+  if (!A.user) { welcome.hidden = false; return; }                 // 로그인이 필요해요
+  const on = A.favs.has(k);
+  const { error } = on ? await A.sb.from("user_favorite").delete().eq("cafe_id", k) : await A.sb.from("user_favorite").insert({ cafe_id: k });
+  if (error) return toast("저장하지 못했어요");
+  on ? A.favs.delete(k) : A.favs.add(k);
+  const b = $("[data-save]"); if (b) b.outerHTML = V.save(c);
+  toast(on ? "저장을 해제했어요" : "저장했어요");
 }
 async function googleLogin() {
   const { error } = await A.sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + location.pathname } });
@@ -318,7 +335,7 @@ const V = {
     const nav = c.lat != null ? `https://map.kakao.com/link/to/${q},${c.lat},${c.lng}` : `https://map.kakao.com/link/search/${q}`;
     return `<div class="page detail" data-screen="detail">
       <div class="toprow"><button class="back" data-back>${S.results.length ? "← 후보 목록" : "← 뒤로"}</button><button class="link" data-showmap>지도에서 보기</button></div>
-      <div class="dname"><div class="dtxt"><h2>${esc(c.name)} ${V.badge(c)}</h2>${c.address ? `<p class="addr">${esc(c.address)}</p>` : ""}</div><button type="button" class="askbtn" data-ask>AI에게 묻기</button></div>
+      <div class="dname"><div class="dtxt"><h2>${esc(c.name)} ${V.badge(c)}</h2>${c.address ? `<p class="addr">${esc(c.address)}</p>` : ""}</div><div class="dbtns">${A.sb ? V.save(c) : ""}<button type="button" class="askbtn" data-ask>AI에게 묻기</button></div></div>
       <div class="info">
         ${n.mood ? `<p class="summary">${esc(n.mood.length > 110 ? n.mood.slice(0, 108) + "…" : n.mood)}</p>` : ""}
         <div class="rows">${row("cup", "구분", c.franchise ? "프랜차이즈" : "개인 카페")}${row("clock", "시간", s.hours)}${row("seat", "좌석", s.seating)}${row("cup", "메뉴", s.menu)}${row("mood", "분위기", s.atmosphere)}</div>
@@ -434,11 +451,21 @@ const V = {
     </div>`;
   },
 
-  /* 저장됨: MVP 에서는 준비 중 */
-  saved: () => `<div class="page" data-screen="saved">
-    <div class="toprow"><h2 class="pagetitle">저장됨</h2></div>
-    <div class="soon">${ico("bookmark")}<b>준비 중이에요</b><p>마음에 든 카페를 모아 보는 기능을 만들고 있어요.</p></div>
-  </div>`,
+  /* 저장 버튼 (카페 상세, 'AI에게 묻기' 옆): 저장하면 파란색으로 채워져요 */
+  save: c => { const on = A.favs.has(cafeKey(c));
+    return `<button type="button" class="savebtn${on ? " on" : ""}" data-save aria-pressed="${on}">${ico("bookmark", "")}<span>${on ? "저장됨" : "저장"}</span></button>`; },
+
+  /* 저장됨: 내가 저장한 카페 (로그인 필요) */
+  saved: () => {
+    const list = S.all.filter(c => A.favs.has(cafeKey(c)));
+    return `<div class="page" data-screen="saved">
+      <div class="toprow"><h2 class="pagetitle">저장됨</h2></div>
+      ${!A.sb ? `<div class="soon">${ico("bookmark")}<b>로그인 기능을 쓸 수 없어요</b></div>`
+        : !A.user ? `<div class="soon">${ico("bookmark")}<b>로그인하면 저장할 수 있어요</b><p>마음에 든 카페를 모아 볼 수 있어요.</p><button class="go blue" data-login>Google로 로그인</button></div>`
+        : list.length ? `<ol class="cards">${list.map(V.card).join("")}</ol>`
+        : `<div class="soon">${ico("bookmark")}<b>아직 저장한 카페가 없어요</b><p>카페 상세에서 '저장'을 눌러 보세요.</p></div>`}
+    </div>`;
+  },
 
   /* 최근 대화 전체보기 */
   history: () => `<div class="page" data-screen="history">
@@ -920,6 +947,7 @@ document.addEventListener("click", e => {
   const nv = t.closest("[data-nav]");
   if (nv) return navTo(nv.dataset.nav);
   if (t.closest("[data-newchat]")) return newChat();
+  if (t.closest("[data-save]")) return toggleFav();
   if (t.closest("[data-ask]")) { go("ask", S.selected); return qEl.focus(); }
   const aq = t.closest("[data-askq]");
   if (aq) return ask(aq.dataset.askq);
